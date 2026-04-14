@@ -472,8 +472,13 @@
                     <!-- Appointment Timeline Section -->
                     <div class="form-row" id="patientAppointmentTimelineSection" style="display: none;">
                         <div class="form-group full-width">
-                            <label>Appointment Timeline</label>
-                            <div id="patientAppointmentTimeline" class="appointment-timeline">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <label style="margin-bottom: 0;">Appointment Timeline</label>
+                                <button type="button" id="toggleTimelineBtn" class="btn btn-sm btn-secondary" style="padding: 4px 12px; font-size: 13px;">
+                                    📅 Show Timeline
+                                </button>
+                            </div>
+                            <div id="patientAppointmentTimeline" class="appointment-timeline" style="display: none;">
                                 <!-- Timeline items will be inserted here -->
                             </div>
                         </div>

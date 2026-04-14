@@ -136,8 +136,30 @@ function initWebSocket() {
         ws.onmessage = (event) => {
             // Handle messages from server (if needed)
             const data = JSON.parse(event.data);
+            console.log('[WS] Received message:', data.type);
+            
             if (data.type === 'connection_ack') {
                 console.log('WebSocket connection acknowledged');
+            }
+            
+            // Handle appointment changes and refresh data
+            if (data.type === 'appointment_updated' || 
+                data.type === 'appointment_created' || 
+                data.type === 'appointment_deleted' ||
+                data.type === 'patient_arrived' ||
+                data.type === 'consultation_started' ||
+                data.type === 'consultation_finished' ||
+                data.type === 'queue_update' ||
+                data.type === 'sync_complete') {
+                console.log('[WS] Appointment changed, reloading data...');
+                // Reload appointments from IndexedDB
+                loadFromStorage().then(() => {
+                    renderAppointmentTable();
+                    updateQueueSummary();
+                    showNotification('Data updated from another device', 'info');
+                }).catch(err => {
+                    console.error('[WS] Error reloading data:', err);
+                });
             }
         };
 
@@ -489,6 +511,7 @@ const elements = {
     closeTimelineDialog: document.getElementById('closeTimelineDialog'),
     timelinePatientInfo: document.getElementById('timelinePatientInfo'),
     timelineContent: document.getElementById('timelineContent'),
+    toggleTimelineBtn: document.getElementById('toggleTimelineBtn'),
     labResultAlert: document.getElementById('labResultAlert'),
     closeLabResultAlert: document.getElementById('closeLabResultAlert'),
     labResultAlertContent: document.getElementById('labResultAlertContent'),
@@ -1468,10 +1491,13 @@ function loadPatientToForm(patientId) {
 /**
  * Load and display appointment timeline for a patient
  */
+let timelineVisible = false;
+
 function loadPatientAppointmentTimeline(patientId) {
     const timelineSection = document.getElementById('patientAppointmentTimelineSection');
     const timelineContainer = document.getElementById('patientAppointmentTimeline');
-    
+    const toggleBtn = document.getElementById('toggleTimelineBtn');
+
     // Find all appointments for this patient
     const patientAppointments = appointments
         .filter(a => a.patientId === patientId)
@@ -1479,28 +1505,38 @@ function loadPatientAppointmentTimeline(patientId) {
             // Sort by appointment date (newest first)
             return new Date(b.appointmentTime) - new Date(a.appointmentTime);
         });
-    
+
     // Show timeline section only if patient is being edited (not creating new)
     if (patientIsEditing && patientAppointments.length > 0) {
         timelineSection.style.display = 'block';
         
-        // Generate timeline HTML
+        // Store appointments data for rendering when button is clicked
+        window._timelinePatientAppointments = patientAppointments;
+        
+        // Reset timeline visibility when loading new patient
+        timelineVisible = false;
+        timelineContainer.style.display = 'none';
+        if (toggleBtn) {
+            toggleBtn.innerHTML = '📅 Show Timeline';
+        }
+
+        // Generate timeline HTML (stored for later use)
         let timelineHTML = '';
         patientAppointments.forEach(appt => {
             const apptDate = new Date(appt.appointmentTime);
-            const dateStr = apptDate.toLocaleDateString('en-US', { 
-                month: 'short', 
-                day: 'numeric', 
-                year: 'numeric' 
+            const dateStr = apptDate.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric'
             });
-            const timeStr = apptDate.toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
-                minute: '2-digit' 
+            const timeStr = apptDate.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit'
             });
-            
+
             const statusClass = appt.status.toLowerCase().replace(' ', '-');
             const bookingNum = appt.bookingNumber !== null && appt.bookingNumber !== undefined ? `#${appt.bookingNumber}` : '';
-            
+
             timelineHTML += `
                 <div class="timeline-item status-${statusClass}">
                     <div class="timeline-date">
@@ -1515,12 +1551,33 @@ function loadPatientAppointmentTimeline(patientId) {
                 </div>
             `;
         });
-        
+
         timelineContainer.innerHTML = timelineHTML;
     } else {
         // Hide timeline for new patients or if no appointments
         timelineSection.style.display = 'none';
         timelineContainer.innerHTML = '';
+        timelineVisible = false;
+    }
+}
+
+/**
+ * Toggle timeline visibility
+ */
+function toggleTimeline() {
+    const timelineContainer = document.getElementById('patientAppointmentTimeline');
+    const toggleBtn = document.getElementById('toggleTimelineBtn');
+    
+    if (!timelineContainer || !toggleBtn) return;
+    
+    timelineVisible = !timelineVisible;
+    
+    if (timelineVisible) {
+        timelineContainer.style.display = 'block';
+        toggleBtn.innerHTML = '📅 Hide Timeline';
+    } else {
+        timelineContainer.style.display = 'none';
+        toggleBtn.innerHTML = '📅 Show Timeline';
     }
 }
 
@@ -5508,6 +5565,11 @@ function setupEventListeners() {
     elements.timelineDialog.addEventListener('click', (e) => {
         if (e.target === elements.timelineDialog) closeTimelineDialog();
     });
+    
+    // Toggle timeline button
+    if (elements.toggleTimelineBtn) {
+        elements.toggleTimelineBtn.addEventListener('click', toggleTimeline);
+    }
 
     // Close lab result alert
     elements.closeLabResultAlert.addEventListener('click', closeLabResultAlert);
