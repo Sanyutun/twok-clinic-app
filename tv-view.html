@@ -594,7 +594,12 @@
         // Configuration
         const TARGET_DOCTOR = 'Dr. Soe Chan Myae';
         const SCREEN_SWITCH_INTERVAL = 10000; // 10 seconds
-        const WS_URL = 'ws://localhost:9000';
+        
+        // Auto-detect WebSocket URL based on current host
+        const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const WS_HOST = window.location.host;
+        const WS_URL = `${WS_PROTOCOL}//${WS_HOST}`;
+        
         const RECONNECT_DELAY = 3000; // 3 seconds
 
         /**

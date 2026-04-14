@@ -67,7 +67,10 @@ const DEFAULT_EXPENSE_CATEGORIES = [
 ];
 
 // ==================== WEBSOCKET CONFIGURATION ====================
-const WS_URL = 'ws://localhost:9000';
+// Auto-detect WebSocket URL based on current host
+const WS_PROTOCOL = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const WS_HOST = typeof window !== 'undefined' ? window.location.host : 'localhost:3000';
+const WS_URL = `${WS_PROTOCOL}//${WS_HOST}`;
 const WS_RECONNECT_DELAY = 3000; // 3 seconds
 let ws = null;
 let wsReconnectTimer = null;
