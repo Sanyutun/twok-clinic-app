@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="TWOK Clinic - Calendar View for Doctor Instructions">
+    <meta name="theme-color" content="#2563eb">
+    <title>Calendar View - TWOK Clinic</title>
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="calendar-view.css">
+</head>
+<body>
+    <div class="calendar-app">
+        <!-- Header with Navigation -->
+        <header class="calendar-header">
+            <div class="calendar-header-top">
+                <button type="button" id="backToMainBtn" class="btn btn-secondary btn-sm" title="Back to Main App">
+                    ← Back
+                </button>
+                <h1 class="calendar-title">📅 Calendar View</h1>
+                <div class="calendar-status">
+                    <span id="connectionStatus" class="status-indicator online" title="Online"></span>
+                </div>
+            </div>
+
+            <!-- Calendar Navigation -->
+            <div class="calendar-nav">
+                <div class="calendar-nav-left">
+                    <button type="button" id="prevMonthBtn" class="btn btn-icon" title="Previous">
+                        ←
+                    </button>
+                    <button type="button" id="todayBtn" class="btn btn-secondary btn-sm">
+                        Today
+                    </button>
+                    <button type="button" id="nextMonthBtn" class="btn btn-icon" title="Next">
+                        →
+                    </button>
+                    <h2 id="currentMonthYear" class="current-month-year"></h2>
+                </div>
+
+                <div class="calendar-nav-center">
+                    <!-- View Switcher -->
+                    <div class="view-switcher">
+                        <button type="button" class="view-btn active" data-view="month">Month</button>
+                        <button type="button" class="view-btn" data-view="week">Week</button>
+                        <button type="button" class="view-btn" data-view="day">Day</button>
+                    </div>
+                </div>
+
+                <div class="calendar-nav-right">
+                    <button type="button" id="refreshBtn" class="btn btn-icon" title="Refresh">
+                        🔄
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filters Bar -->
+            <div class="filters-bar">
+                <select id="filterDoctor" class="filter-select">
+                    <option value="">All Doctors</option>
+                </select>
+
+                <select id="filterType" class="filter-select">
+                    <option value="">All Types</option>
+                    <option value="follow-up">Follow-up Visits</option>
+                    <option value="tests-before">Tests Before Visit</option>
+                    <option value="pending">Pending Tests</option>
+                    <option value="todo">TODO (No Date)</option>
+                </select>
+
+                <button type="button" id="clearFiltersBtn" class="btn btn-secondary btn-sm">
+                    Clear Filters
+                </button>
+            </div>
+        </header>
+
+        <!-- Legend -->
+        <div class="calendar-legend">
+            <div class="legend-item">
+                <span class="legend-color legend-blue"></span>
+                <span class="legend-label">Follow-up Visit</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color legend-orange"></span>
+                <span class="legend-label">Tests Before Visit</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #f59e0b;"></span>
+                <span class="legend-label">Pending Tests</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background-color: #a855f7;"></span>
+                <span class="legend-label">TODO (No Date)</span>
+            </div>
+        </div>
+
+        <!-- Calendar Grid Container -->
+        <main class="calendar-main">
+            <!-- Month View -->
+            <div id="monthView" class="calendar-view active">
+                <div class="calendar-grid-month">
+                    <!-- Day headers -->
+                    <div class="calendar-day-headers">
+                        <div class="day-header">Sun</div>
+                        <div class="day-header">Mon</div>
+                        <div class="day-header">Tue</div>
+                        <div class="day-header">Wed</div>
+                        <div class="day-header">Thu</div>
+                        <div class="day-header">Fri</div>
+                        <div class="day-header">Sat</div>
+                    </div>
+                    <!-- Calendar days grid (populated by JS) -->
+                    <div id="calendarDaysGrid" class="calendar-days-grid"></div>
+                </div>
+            </div>
+
+            <!-- Week view placeholder -->
+            <div id="weekView" class="calendar-view hidden">
+                <div class="calendar-week-grid" id="calendarWeekGrid"></div>
+            </div>
+
+            <!-- Day view placeholder -->
+            <div id="dayView" class="calendar-view hidden">
+                <div class="calendar-day-grid" id="calendarDayGrid"></div>
+            </div>
+        </main>
+
+        <!-- Event Detail Dialog -->
+        <div id="eventDetailDialog" class="event-dialog hidden">
+            <div class="event-dialog-backdrop"></div>
+            <div class="event-dialog-content">
+                <div class="event-dialog-header">
+                    <h3 id="eventDialogTitle">Event Details</h3>
+                    <button type="button" id="closeEventDialog" class="dialog-close">&times;</button>
+                </div>
+                <div class="event-dialog-body">
+                    <div id="eventDialogContent"></div>
+                </div>
+                <div class="event-dialog-footer">
+                    <button type="button" id="eventDialogCloseBtn" class="btn btn-secondary">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="calendarLoading" class="loading-indicator hidden">
+            <div class="spinner"></div>
+            <p>Loading calendar data...</p>
+        </div>
+
+        <!-- Empty State -->
+        <div id="calendarEmptyState" class="empty-state hidden">
+            <div class="empty-state-icon">📅</div>
+            <h3>No Events Found</h3>
+            <p>There are no scheduled events for this period.</p>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="../indexeddb.js"></script>
+    <script src="../components/calendar-event.js"></script>
+    <script src="../components/calendar-filter.js"></script>
+    <script src="../components/calendar-grid.js"></script>
+    <script src="../services/instructionService.js"></script>
+    <script src="../services/labService.js"></script>
+    <script src="../services/calendarService.js"></script>
+    <script src="calendar-view.js"></script>
+</body>
+</html>

@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="TWOK Clinic - Pharmacist Corner for medication and expense management">
+    <meta name="theme-color" content="#2c7be5">
+    <title>Pharmacist Corner - TWOK Clinic</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* Pharmacist Corner Specific Styles */
+        :root {
+            --pharmacist-primary: #2c7be5;
+            --pharmacist-primary-hover: #1a68d1;
+            --pharmacist-bg: #f8fafc;
+            --pharmacist-card-bg: #ffffff;
+            --pharmacist-text: #1e293b;
+            --pharmacist-text-secondary: #64748b;
+            --pharmacist-border: #e2e8f0;
+            --pharmacist-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            --pharmacist-shadow-md: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .pharmacist-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: var(--pharmacist-bg);
+            min-height: 100vh;
+        }
+
+        .pharmacist-header {
+            background: linear-gradient(135deg, var(--pharmacist-primary) 0%, #1e5bb5 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            box-shadow: var(--pharmacist-shadow-md);
+        }
+
+        .pharmacist-header h1 {
+            margin: 0 0 8px 0;
+            font-size: 1.8rem;
+            font-weight: 700;
+        }
+
+        .pharmacist-header p {
+            margin: 0;
+            opacity: 0.9;
+            font-size: 0.95rem;
+        }
+
+        .pharmacist-toolbar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+        }
+
+        .pharmacist-search {
+            flex: 1;
+            min-width: 250px;
+            position: relative;
+        }
+
+        .pharmacist-search input {
+            width: 100%;
+            padding: 12px 45px 12px 15px;
+            border: 1px solid var(--pharmacist-border);
+            border-radius: 8px;
+            font-size: 1rem;
+            background-color: var(--pharmacist-card-bg);
+        }
+
+        .pharmacist-search input:focus {
+            outline: none;
+            border-color: var(--pharmacist-primary);
+            box-shadow: 0 0 0 3px rgba(44, 123, 229, 0.1);
+        }
+
+        .pharmacist-search-icon {
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--pharmacist-text-secondary);
+            font-size: 1.2rem;
+        }
+
+        .pharmacist-filters {
+            display: flex;
+            gap: 10px;
+        }
+
+        .pharmacist-filter-btn {
+            padding: 12px 20px;
+            border: 1px solid var(--pharmacist-border);
+            border-radius: 8px;
+            background-color: var(--pharmacist-card-bg);
+            color: var(--pharmacist-text);
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .pharmacist-filter-btn:hover {
+            background-color: #f1f5f9;
+        }
+
+        .pharmacist-filter-btn.active {
+            background-color: var(--pharmacist-primary);
+            color: white;
+            border-color: var(--pharmacist-primary);
+        }
+
+        .pharmacist-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .pharmacist-stat-card {
+            background-color: var(--pharmacist-card-bg);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: var(--pharmacist-shadow);
+            border: 1px solid var(--pharmacist-border);
+        }
+
+        .pharmacist-stat-label {
+            font-size: 0.85rem;
+            color: var(--pharmacist-text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .pharmacist-stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--pharmacist-primary);
+        }
+
+        .pharmacist-cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 20px;
+        }
+
+        .patient-card {
+            background-color: var(--pharmacist-card-bg);
+            border-radius: 12px;
+            box-shadow: var(--pharmacist-shadow);
+            border: 1px solid var(--pharmacist-border);
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+
+        .patient-card:hover {
+            box-shadow: var(--pharmacist-shadow-md);
+            transform: translateY(-2px);
+        }
+
+        .patient-card.completed {
+            opacity: 0.85;
+            background-color: #f8fafc;
+        }
+
+        .patient-card-header {
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--pharmacist-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .patient-card-booking {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--pharmacist-primary);
+        }
+
+        .patient-card-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .patient-card-status.pending {
+            background-color: #fef3c7;
+            color: #b45309;
+        }
+
+        .patient-card-status.completed {
+            background-color: #d1fae5;
+            color: #047857;
+        }
+
+        .patient-card-body {
+            padding: 20px;
+        }
+
+        .patient-card-name {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--pharmacist-text);
+            margin-bottom: 12px;
+        }
+
+        .patient-card-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .patient-card-info-item {
+            font-size: 0.9rem;
+            color: var(--pharmacist-text-secondary);
+        }
+
+        .patient-card-info-item strong {
+            color: var(--pharmacist-text);
+            display: block;
+            font-size: 0.8rem;
+            margin-bottom: 2px;
+        }
+
+        .patient-card-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .patient-card-btn {
+            padding: 12px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .patient-card-btn-instructions {
+            background-color: #eff6ff;
+            color: var(--pharmacist-primary);
+        }
+
+        .patient-card-btn-instructions:hover {
+            background-color: #dbeafe;
+        }
+
+        .patient-card-btn-expenses {
+            background-color: #f0fdf4;
+            color: #059669;
+        }
+
+        .patient-card-btn-expenses:hover {
+            background-color: #dcfce7;
+        }
+
+        .patient-card-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .patient-card-completed-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 6px 12px;
+            background-color: #d1fae5;
+            color: #047857;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+
+        .pharmacist-no-results {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--pharmacist-text-secondary);
+        }
+
+        .pharmacist-no-results-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+
+        .pharmacist-no-results h3 {
+            font-size: 1.3rem;
+            margin-bottom: 10px;
+            color: var(--pharmacist-text);
+        }
+
+        .sync-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 15px;
+            background-color: #fef3c7;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+            color: #b45309;
+        }
+
+        .sync-indicator.syncing {
+            background-color: #dbeafe;
+            color: #1e40af;
+        }
+
+        .sync-indicator.synced {
+            background-color: #d1fae5;
+            color: #047857;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid currentColor;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .pharmacist-container {
+                padding: 15px;
+            }
+
+            .pharmacist-header h1 {
+                font-size: 1.5rem;
+            }
+
+            .pharmacist-cards-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .pharmacist-filters {
+                width: 100%;
+            }
+
+            .pharmacist-filter-btn {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="pharmacist-container">
+        <!-- Header -->
+        <header class="pharmacist-header">
+            <h1>💊 Pharmacist Corner</h1>
+            <p>Manage medications and expenses for completed consultations</p>
+        </header>
+
+        <!-- Sync Indicator -->
+        <div id="syncIndicator" class="sync-indicator hidden">
+            <span class="spinner"></span>
+            <span id="syncStatusText">Syncing changes...</span>
+        </div>
+
+        <!-- Stats -->
+        <div class="pharmacist-stats">
+            <div class="pharmacist-stat-card">
+                <div class="pharmacist-stat-label">Total Patients</div>
+                <div class="pharmacist-stat-value" id="totalPatientsCount">0</div>
+            </div>
+            <div class="pharmacist-stat-card">
+                <div class="pharmacist-stat-label">Pending</div>
+                <div class="pharmacist-stat-value" id="pendingCount">0</div>
+            </div>
+            <div class="pharmacist-stat-card">
+                <div class="pharmacist-stat-label">Completed</div>
+                <div class="pharmacist-stat-value" id="completedCount">0</div>
+            </div>
+            <div class="pharmacist-stat-card">
+                <div class="pharmacist-stat-label">Queued for Sync</div>
+                <div class="pharmacist-stat-value" id="queuedCount">0</div>
+            </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="pharmacist-toolbar">
+            <div class="pharmacist-search">
+                <input type="text" id="patientSearchInput" placeholder="Search by patient name or booking number...">
+                <span class="pharmacist-search-icon">🔍</span>
+            </div>
+            <div class="pharmacist-filters">
+                <button class="pharmacist-filter-btn active" data-filter="all">All</button>
+                <button class="pharmacist-filter-btn" data-filter="pending">Pending</button>
+                <button class="pharmacist-filter-btn" data-filter="completed">Completed</button>
+            </div>
+        </div>
+
+        <!-- Patient Cards Grid -->
+        <div id="patientCardsGrid" class="pharmacist-cards-grid">
+            <!-- Cards will be inserted here -->
+        </div>
+
+        <!-- No Results -->
+        <div id="noResultsMessage" class="pharmacist-no-results hidden">
+            <div class="pharmacist-no-results-icon">📭</div>
+            <h3>No patients found</h3>
+            <p>There are no completed consultations for today yet.</p>
+        </div>
+    </div>
+
+    <!-- Load shared styles -->
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- Load services and components -->
+    <script src="components/instruction-form.js"></script>
+    <script src="components/expense-form.js"></script>
+
+    <!-- Pharmacist Corner Script -->
+    <script src="js/pharmacist-corner.js"></script>
+</body>
+</html>

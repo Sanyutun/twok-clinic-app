@@ -1,0 +1,2233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="description" content="TWOK Clinic - Comprehensive patient management system for registration, appointments, and follow-up care">
+    <meta name="theme-color" content="#2563eb">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="TWOK Clinic">
+    <link rel="apple-touch-icon" href="icons/icon-192x192.png">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="https://unpkg.com/primeicons/primeicons.css">
+    <title>TWOK Clinic - Registration System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h1>TWOK Clinic</h1>
+                    <p class="subtitle" id="headerSubtitle">Patient Registration System</p>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button type="button" id="headerInstallBtn" class="pwa-header-install-btn" title="Install TWOK Clinic" style="display:none;">📲 Install</button>
+                    <a href="tv-view.html" target="_blank" class="tv-view-btn" title="Open TV Queue Display">
+                        <i class="pi pi-tv"></i> TV Display
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <!-- Patient Section -->
+        <section id="patientSection" class="module-section">
+            <!-- Toolbar with Search and New Patient Button -->
+            <div class="toolbar">
+                <div class="search-container">
+                    <input
+                        type="text"
+                        id="patientSearchInput"
+                        class="search-input"
+                        placeholder="Search by name, age, phone, or address..."
+                        autocomplete="off"
+                    >
+                    <span class="search-icon">🔍</span>
+                </div>
+                <button type="button" id="newPatientBtn" class="btn btn-primary new-record-btn">
+                    + New Patient
+                </button>
+            </div>
+
+            <!-- No Results Message -->
+            <div id="patientNoResultsMessage" class="no-results hidden">
+                <p>No patient found. <a href="#" id="addNewPatientLink">Add a new patient</a></p>
+            </div>
+
+            <!-- Patient List Table -->
+            <section class="table-section">
+                <div class="table-header">
+                    <h2>Patient List</h2>
+                    <span id="patientCount" class="record-count">0 patients</span>
+                </div>
+                <div class="table-wrapper">
+                    <table id="patientTable">
+                        <thead>
+                            <tr>
+                                <th>Patient ID</th>
+                                <th>Name</th>
+                                <th>Age</th>
+                                <th>Sex</th>
+                                <th>Address</th>
+                                <th>Phone</th>
+                                <th>FOC</th>
+                                <th>Note</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="patientTableBody">
+                            <!-- Patient rows will be inserted here -->
+                        </tbody>
+                    </table>
+                    <div id="patientEmptyTableMessage" class="empty-message">
+                        <p>No patients registered yet.</p>
+                        <button type="button" id="patientEmptyNewBtn" class="btn btn-primary">
+                            + Register First Patient
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Address Management Modal -->
+            <div id="addressModal" class="modal hidden">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>Manage Addresses</h3>
+                        <button type="button" id="closeAddressModal" class="modal-close">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <ul id="addressListManage" class="manage-list"></ul>
+                        <div class="add-item-form">
+                            <input
+                                type="text"
+                                id="newAddressInput"
+                                class="form-control"
+                                placeholder="Enter new address"
+                            >
+                            <button type="button" id="addAddressBtn" class="btn btn-primary">Add</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Doctor Section -->
+        <section id="doctorSection" class="module-section hidden">
+            <!-- Toolbar with Search and New Doctor Button -->
+            <div class="toolbar">
+                <div class="search-container">
+                    <input
+                        type="text"
+                        id="doctorSearchInput"
+                        class="search-input"
+                        placeholder="Search by name, speciality, hospital, or phone..."
+                        autocomplete="off"
+                    >
+                    <span class="search-icon">🔍</span>
+                </div>
+                <button type="button" id="newDoctorBtn" class="btn btn-primary new-record-btn">
+                    + New Doctor
+                </button>
+            </div>
+
+            <!-- No Results Message -->
+            <div id="doctorNoResultsMessage" class="no-results hidden">
+                <p>No doctor found. <a href="#" id="addNewDoctorLink">Add a new doctor</a></p>
+            </div>
+
+            <!-- Doctor List Table -->
+            <section class="table-section">
+                <div class="table-header">
+                    <h2>Doctor List</h2>
+                    <div class="table-header-actions">
+                        <span id="doctorCount" class="record-count">0 doctors</span>
+                        <button type="button" id="manageSpecialityBtn" class="btn btn-secondary btn-sm" title="Manage Specialities">
+                            🏷️
+                        </button>
+                        <button type="button" id="manageHospitalBtn" class="btn btn-secondary btn-sm" title="Manage Hospitals">
+                            🏥
+                        </button>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table id="doctorTable">
+                        <thead>
+                            <tr>
+                                <th data-sort="id">Doctor ID <span class="sort-icon">↕</span></th>
+                                <th data-sort="name">Name <span class="sort-icon">↕</span></th>
+                                <th data-sort="speciality">Speciality <span class="sort-icon">↕</span></th>
+                                <th data-sort="hospital">Hospital <span class="sort-icon">↕</span></th>
+                                <th data-sort="phone">Phone <span class="sort-icon">↕</span></th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="doctorTableBody">
+                            <!-- Doctor rows will be inserted here -->
+                        </tbody>
+                    </table>
+                    <div id="doctorEmptyTableMessage" class="empty-message">
+                        <p>No doctors registered yet.</p>
+                        <button type="button" id="doctorEmptyNewBtn" class="btn btn-primary">
+                            + Register First Doctor
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Bottom Sheet Modal for Doctor Form -->
+            <div id="doctorFormModal" class="bottom-sheet hidden">
+                <div class="bottom-sheet-backdrop"></div>
+                <div class="bottom-sheet-content">
+                    <div class="bottom-sheet-header">
+                        <h2 id="doctorFormTitle">Register New Doctor</h2>
+                        <button type="button" id="closeDoctorFormModal" class="bottom-sheet-close">&times;</button>
+                    </div>
+                    <div class="bottom-sheet-body">
+                        <form id="doctorForm">
+                            <input type="hidden" id="doctorEditIndex" value="">
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="doctorId">Doctor ID</label>
+                                    <input
+                                        type="text"
+                                        id="doctorId"
+                                        class="form-control"
+                                        readonly
+                                        tabindex="-1"
+                                    >
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="doctorName">Doctor Name <span class="required">*</span></label>
+                                    <input
+                                        type="text"
+                                        id="doctorName"
+                                        class="form-control"
+                                        required
+                                        placeholder="e.g., Dr. Aung Aung"
+                                    >
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="doctorSpeciality">Speciality <span class="required">*</span></label>
+                                    <div class="select-wrapper">
+                                        <input
+                                            type="text"
+                                            id="doctorSpeciality"
+                                            class="form-control"
+                                            list="specialityList"
+                                            required
+                                            placeholder="Type or select speciality"
+                                        >
+                                        <datalist id="specialityList"></datalist>
+                                        <button type="button" id="manageSpecialityInFormBtn" class="input-action-btn" title="Manage Specialities">
+                                            ⚙️
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="doctorHospital">Hospital <span class="required">*</span></label>
+                                    <div class="select-wrapper">
+                                        <input
+                                            type="text"
+                                            id="doctorHospital"
+                                            class="form-control"
+                                            list="hospitalList"
+                                            required
+                                            placeholder="Type or select hospital"
+                                        >
+                                        <datalist id="hospitalList"></datalist>
+                                        <button type="button" id="manageHospitalInFormBtn" class="input-action-btn" title="Manage Hospitals">
+                                            ⚙️
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group full-width">
+                                    <label for="doctorPhone">Phone Number <span class="required">*</span></label>
+                                    <div class="phone-wrapper">
+                                        <input
+                                            type="tel"
+                                            id="doctorPhone"
+                                            class="form-control"
+                                            required
+                                            placeholder="Enter phone number"
+                                            pattern="[0-9]*"
+                                        >
+                                        <button type="button" id="doctorCopyPhoneBtn" class="copy-btn" title="Copy to clipboard">
+                                            📋
+                                        </button>
+                                        <span id="doctorCopyTooltip" class="tooltip">Copied</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" id="doctorSaveBtn" class="btn btn-primary">
+                                    <span id="doctorSaveBtnText">Save Doctor</span>
+                                </button>
+                                <button type="button" id="doctorClearBtn" class="btn btn-secondary">
+                                    Clear Form
+                                </button>
+                                <button type="button" id="doctorDeleteBtn" class="btn btn-danger" style="display: none;">
+                                    Delete Doctor
+                                </button>
+                                <button type="button" id="doctorCancelBtn" class="btn btn-secondary">
+                                    Cancel
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Speciality Management Modal -->
+            <div id="specialityModal" class="modal hidden">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>Manage Specialities</h3>
+                        <button type="button" id="closeSpecialityModal" class="modal-close">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <ul id="specialityListManage" class="manage-list"></ul>
+                        <div class="add-item-form">
+                            <input
+                                type="text"
+                                id="newSpecialityInput"
+                                class="form-control"
+                                placeholder="Enter new speciality"
+                            >
+                            <button type="button" id="addSpecialityBtn" class="btn btn-primary">Add</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hospital Management Modal -->
+            <div id="hospitalModal" class="modal hidden">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>Manage Hospitals</h3>
+                        <button type="button" id="closeHospitalModal" class="modal-close">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <ul id="hospitalListManage" class="manage-list"></ul>
+                        <div class="add-item-form">
+                            <input
+                                type="text"
+                                id="newHospitalInput"
+                                class="form-control"
+                                placeholder="Enter new hospital"
+                            >
+                            <button type="button" id="addHospitalBtn" class="btn btn-primary">Add</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Success Notification -->
+        <div id="notification" class="notification hidden">
+            <span id="notificationText"></span>
+        </div>
+    </div>
+
+    <!-- Global Patient Form Modal (used by both Patient and Appointment tabs) -->
+    <div id="patientFormModal" class="bottom-sheet hidden">
+        <div class="bottom-sheet-backdrop"></div>
+        <div class="bottom-sheet-content">
+            <div class="bottom-sheet-header">
+                <h2 id="patientFormTitle">Register New Patient</h2>
+                <button type="button" id="closePatientFormModal" class="bottom-sheet-close">&times;</button>
+            </div>
+            <div class="bottom-sheet-body">
+                <form id="patientForm">
+                    <input type="hidden" id="patientEditIndex" value="">
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="patientId">Patient ID</label>
+                            <input
+                                type="text"
+                                id="patientId"
+                                class="form-control"
+                                readonly
+                                tabindex="-1"
+                            >
+                        </div>
+
+                        <div class="form-group">
+                            <label for="patientName">Patient Name <span class="required">*</span></label>
+                            <input
+                                type="text"
+                                id="patientName"
+                                class="form-control"
+                                required
+                                placeholder="Enter patient name"
+                                tabindex="1"
+                                inputmode="text"
+                            >
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="patientAge">Age</label>
+                            <input
+                                type="text"
+                                id="patientAge"
+                                class="form-control"
+                                placeholder="e.g., 25y, 5y 3m, 10m"
+                                tabindex="2"
+                                inputmode="text"
+                            >
+                        </div>
+
+                        <div class="form-group">
+                            <label for="patientSex">Sex</label>
+                            <select id="patientSex" class="form-control" tabindex="3">
+                                <option value="">Select Sex</option>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group full-width">
+                            <label for="patientAddress">Address</label>
+                            <div class="address-wrapper">
+                                <input
+                                    type="text"
+                                    id="patientAddress"
+                                    class="form-control"
+                                    list="addressList"
+                                    placeholder="Type or select address"
+                                    tabindex="4"
+                                    inputmode="text"
+                                >
+                                <datalist id="addressList"></datalist>
+                                <button type="button" id="manageAddressBtn" class="manage-address-btn" title="Manage addresses">
+                                    ⚙️
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group full-width">
+                            <label for="patientPhone">Phone Number</label>
+                            <div class="phone-wrapper">
+                                <input
+                                    type="tel"
+                                    id="patientPhone"
+                                    class="form-control"
+                                    placeholder="Enter phone number"
+                                    pattern="[0-9]*"
+                                    tabindex="5"
+                                    inputmode="tel"
+                                >
+                                <button type="button" id="patientCopyPhoneBtn" class="copy-btn" title="Copy to clipboard">
+                                    📋
+                                </button>
+                                <span id="patientCopyTooltip" class="tooltip">Copied</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group full-width">
+                            <label for="patientNote">Additional Note</label>
+                            <textarea
+                                id="patientNote"
+                                class="form-control"
+                                rows="3"
+                                placeholder="Enter any additional notes (optional)"
+                            ></textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input
+                                    type="checkbox"
+                                    id="patientIsFoc"
+                                    style="width: 18px; height: 18px; cursor: pointer;"
+                                >
+                                <span>FOC (Free of Charge) Patient</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Appointment Timeline Section -->
+                    <div class="form-row" id="patientAppointmentTimelineSection" style="display: none;">
+                        <div class="form-group full-width">
+                            <label>Appointment Timeline</label>
+                            <div id="patientAppointmentTimeline" class="appointment-timeline">
+                                <!-- Timeline items will be inserted here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" id="patientSaveBtn" class="btn btn-primary">
+                            <span id="patientSaveBtnText">Save Patient</span>
+                        </button>
+                        <button type="button" id="patientClearBtn" class="btn btn-secondary">
+                            Clear Form
+                        </button>
+                        <button type="button" id="patientDeleteBtn" class="btn btn-danger" style="display: none;">
+                            Delete Patient
+                        </button>
+                        <button type="button" id="patientCancelBtn" class="btn btn-secondary">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Off-Canvas Sidebar Navigation -->
+    <div id="sidebarOverlay" class="sidebar-overlay hidden"></div>
+    <nav id="sidebarNav" class="sidebar-nav">
+        <div class="sidebar-header">
+            <h2>TWOK Clinic</h2>
+            <button type="button" id="closeSidebarBtn" class="sidebar-close">&times;</button>
+        </div>
+        <div class="sidebar-content">
+            <button type="button" class="sidebar-item active" data-section="patient">
+                <span class="sidebar-icon">👥</span>
+                <span class="sidebar-label">Patients</span>
+            </button>
+            <button type="button" class="sidebar-item" data-section="doctor">
+                <span class="sidebar-icon">🩺</span>
+                <span class="sidebar-label">Doctors</span>
+            </button>
+            <button type="button" class="sidebar-item" data-section="appointment">
+                <span class="sidebar-icon">📅</span>
+                <span class="sidebar-label">Appointments</span>
+            </button>
+            <button type="button" class="sidebar-item" data-section="instruction">
+                <span class="sidebar-icon">📝</span>
+                <span class="sidebar-label">Instructions</span>
+            </button>
+            <button type="button" class="sidebar-item" data-section="calendar">
+                <span class="sidebar-icon">🗓️</span>
+                <span class="sidebar-label">Calendar</span>
+            </button>
+            <button type="button" class="sidebar-item" data-section="expense">
+                <span class="sidebar-icon">💰</span>
+                <span class="sidebar-label">Expenses</span>
+            </button>
+            <button type="button" class="sidebar-item" data-section="lab">
+                <span class="sidebar-icon">🔬</span>
+                <span class="sidebar-label">Lab Tracker</span>
+            </button>
+            <button type="button" class="sidebar-item" data-section="pharmacist">
+                <span class="sidebar-icon">💊</span>
+                <span class="sidebar-label">Pharmacist</span>
+            </button>
+            <button type="button" class="sidebar-item" data-section="settings">
+                <span class="sidebar-icon">⚙️</span>
+                <span class="sidebar-label">Settings</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Menu Toggle Button -->
+    <button type="button" id="menuToggleBtn" class="menu-toggle">
+        <span class="hamburger-icon"></span>
+    </button>
+
+    <!-- Bottom Navigation (for desktop) -->
+    <nav class="bottom-nav">
+        <button type="button" class="nav-item active" data-section="patient">
+            <span class="nav-icon">👥</span>
+            <span class="nav-label">Patients</span>
+        </button>
+        <button type="button" class="nav-item" data-section="doctor">
+            <span class="nav-icon">🩺</span>
+            <span class="nav-label">Doctors</span>
+        </button>
+        <button type="button" class="nav-item" data-section="appointment">
+            <span class="nav-icon">📅</span>
+            <span class="nav-label">Appointments</span>
+        </button>
+        <button type="button" class="nav-item" data-section="instruction">
+            <span class="nav-icon">📝</span>
+            <span class="nav-label">Instructions</span>
+        </button>
+        <button type="button" class="nav-item" data-section="calendar">
+            <span class="nav-icon">🗓️</span>
+            <span class="nav-label">Calendar</span>
+        </button>
+        <button type="button" class="nav-item" data-section="expense">
+            <span class="nav-icon">💰</span>
+            <span class="nav-label">Expenses</span>
+        </button>
+        <button type="button" class="nav-item" data-section="lab">
+            <span class="nav-icon">🔬</span>
+            <span class="nav-label">Lab Tracker</span>
+        </button>
+        <button type="button" class="nav-item" data-section="pharmacist">
+            <span class="nav-icon">💊</span>
+            <span class="nav-label">Pharmacist</span>
+        </button>
+        <button type="button" class="nav-item" data-section="settings">
+            <span class="nav-icon">⚙️</span>
+            <span class="nav-label">Settings</span>
+        </button>
+    </nav>
+
+    <!-- Appointment Section -->
+    <section id="appointmentSection" class="module-section hidden">
+        <!-- Toolbar with Search, Filter and New Appointment Button -->
+        <div class="toolbar appointment-toolbar">
+            <div class="search-container">
+                <input
+                    type="text"
+                    id="appointmentSearchInput"
+                    class="search-input"
+                    placeholder="Search by patient name, doctor, or phone..."
+                    autocomplete="off"
+                >
+                <span class="search-icon">🔍</span>
+            </div>
+            <div class="appointment-filters">
+                <input
+                    type="date"
+                    id="appointmentDateFilter"
+                    class="form-control filter-input"
+                    title="Filter by date"
+                >
+                <select id="appointmentDoctorFilter" class="form-control filter-input">
+                    <option value="">All Doctors</option>
+                </select>
+            </div>
+            <button type="button" id="newAppointmentBtn" class="btn btn-primary new-record-btn">
+                + New Appointment
+            </button>
+        </div>
+
+        <!-- No Results Message -->
+        <div id="appointmentNoResultsMessage" class="no-results hidden">
+            <p>No appointment found. <a href="#" id="addNewAppointmentLink">Add a new appointment</a></p>
+        </div>
+
+        <!-- Appointment Queue Summary -->
+        <div class="queue-summary" id="queueSummary">
+            <div class="queue-stat">
+                <span class="queue-stat-label">Waiting</span>
+                <span class="queue-stat-value" id="waitingCount">0</span>
+            </div>
+            <div class="queue-stat">
+                <span class="queue-stat-label">In Consult</span>
+                <span class="queue-stat-value" id="inConsultCount">0</span>
+            </div>
+            <div class="queue-stat">
+                <span class="queue-stat-label">Done</span>
+                <span class="queue-stat-value" id="doneCount">0</span>
+            </div>
+            <div class="queue-stat next-patient" id="nextPatientStat">
+                <span class="queue-stat-label">Next Patient</span>
+                <span class="queue-stat-value" id="nextPatientName">-</span>
+            </div>
+            <div class="queue-stat current-consult" id="currentConsultStat">
+                <span class="queue-stat-label">Now Serving</span>
+                <span class="queue-stat-value" id="currentConsultName">-</span>
+            </div>
+            <div class="queue-stat queue-action">
+                <button type="button" id="nextPatientBtn" class="btn btn-success btn-sm" title="Call Next Patient">
+                    📢 Next Patient
+                </button>
+            </div>
+        </div>
+
+        <!-- Appointment List Table -->
+        <section class="table-section">
+            <div class="table-header">
+                <h2>Appointments</h2>
+                <div class="table-header-actions">
+                    <span id="appointmentCount" class="record-count">0 appointments</span>
+                    <button type="button" id="todayAppointmentsBtn" class="btn btn-secondary btn-sm" title="Show Today's Appointments">
+                        📅 Today
+                    </button>
+                </div>
+            </div>
+            <div class="table-wrapper">
+                <table id="appointmentTable">
+                    <thead>
+                        <tr>
+                            <th data-sort="bookingNumber">Queue <span class="sort-icon">↕</span></th>
+                            <th data-sort="patientName">Patient <span class="sort-icon">↕</span></th>
+                            <th>Age</th>
+                            <th>Phone</th>
+                            <th data-sort="doctorName">Doctor <span class="sort-icon">↕</span></th>
+                            <th data-sort="appointmentTime">Time <span class="sort-icon">↕</span></th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Arrival Time</th>
+                            <th>Penalty</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="appointmentTableBody">
+                        <!-- Appointment rows will be inserted here -->
+                    </tbody>
+                </table>
+                <div id="appointmentEmptyTableMessage" class="empty-message">
+                    <p>No appointments scheduled yet.</p>
+                    <button type="button" id="appointmentEmptyNewBtn" class="btn btn-primary">
+                        + Schedule First Appointment
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Bottom Sheet Modal for Appointment Form -->
+        <div id="appointmentFormModal" class="bottom-sheet hidden">
+            <div class="bottom-sheet-backdrop"></div>
+            <div class="bottom-sheet-content">
+                <div class="bottom-sheet-header">
+                    <h2 id="appointmentFormTitle">New Appointment</h2>
+                    <button type="button" id="closeAppointmentFormModal" class="bottom-sheet-close">&times;</button>
+                </div>
+                <div class="bottom-sheet-body">
+                    <form id="appointmentForm">
+                        <input type="hidden" id="appointmentEditIndex" value="">
+                        <input type="hidden" id="appointmentId" value="">
+
+                        <div class="form-row">
+                            <div class="form-group full-width">
+                                <label for="appointmentPatient">Patient Name <span class="required">*</span></label>
+                                <div class="autocomplete-wrapper">
+                                    <input
+                                        type="text"
+                                        id="appointmentPatient"
+                                        class="form-control"
+                                        required
+                                        placeholder="Start typing patient name..."
+                                        autocomplete="off"
+                                        tabindex="1"
+                                        inputmode="text"
+                                    >
+                                    <div id="patientAutocomplete" class="autocomplete-dropdown hidden"></div>
+                                    <button type="button" id="registerNewPatientFromAppt" class="input-action-btn" title="Register New Patient">
+                                        + Patient
+                                    </button>
+                                </div>
+                                <input type="hidden" id="appointmentPatientId" value="">
+                            </div>
+                        </div>
+
+                        <div class="form-row patient-info-display" id="patientInfoDisplay">
+                            <div class="form-group">
+                                <label>Patient Age</label>
+                                <input type="text" id="displayPatientAge" class="form-control" readonly tabindex="-1">
+                            </div>
+                            <div class="form-group">
+                                <label>Patient Sex</label>
+                                <input type="text" id="displayPatientSex" class="form-control" readonly tabindex="-1">
+                            </div>
+                            <div class="form-group">
+                                <label>Patient Phone</label>
+                                <input type="text" id="displayPatientPhone" class="form-control" readonly tabindex="-1">
+                            </div>
+                            <div class="form-group">
+                                <label>FOC Status</label>
+                                <input type="text" id="displayPatientFoc" class="form-control" readonly tabindex="-1" style="font-weight: 500;">
+                            </div>
+                        </div>
+
+                        <!-- Lab Result Warning -->
+                        <div id="labResultWarning" class="lab-result-warning hidden" style="background-color: #fef3c7; border: 1px solid #fbbf24; border-radius: var(--radius); padding: 15px; margin-bottom: 15px;">
+                            <div style="display: flex; align-items: start; gap: 10px;">
+                                <span style="font-size: 1.5rem;">⚠️</span>
+                                <div style="flex: 1;">
+                                    <strong style="color: #92400e;">Lab Result Ready</strong>
+                                    <p style="margin: 5px 0; font-size: 0.9rem; color: #b45309;">Patient has pending lab results that have not been collected.</p>
+                                    <div id="labWarningDetails" style="margin-top: 10px; font-size: 0.85rem;"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group full-width">
+                                <label for="appointmentDoctor">Doctor Name <span class="required">*</span></label>
+                                <div class="autocomplete-wrapper">
+                                    <input
+                                        type="text"
+                                        id="appointmentDoctor"
+                                        class="form-control"
+                                        required
+                                        placeholder="Start typing doctor name..."
+                                        autocomplete="off"
+                                        tabindex="2"
+                                        inputmode="text"
+                                    >
+                                    <div id="doctorAutocomplete" class="autocomplete-dropdown hidden"></div>
+                                </div>
+                                <input type="hidden" id="appointmentDoctorId" value="">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="appointmentDateTime">Date & Time <span class="required">*</span></label>
+                                <input
+                                    type="datetime-local"
+                                    id="appointmentDateTime"
+                                    class="form-control"
+                                    required
+                                    tabindex="3"
+                                >
+                            </div>
+                            <div class="form-group">
+                                <label for="appointmentBookingType">Booking Type <span class="required">*</span></label>
+                                <select id="appointmentBookingType" class="form-control" required tabindex="4">
+                                    <option value="">Select Type</option>
+                                    <option value="Emergency">🚨 Emergency</option>
+                                    <option value="VIP">⭐ VIP</option>
+                                    <option value="Regular">📋 Regular</option>
+                                    <option value="FOC">💝 FOC</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="appointmentBookingNumber">Booking Number</label>
+                                <input
+                                    type="text"
+                                    id="appointmentBookingNumber"
+                                    class="form-control"
+                                    readonly
+                                    tabindex="-1"
+                                >
+                            </div>
+                            <div class="form-group">
+                                <label for="appointmentStatus">Status <span class="required">*</span></label>
+                                <select id="appointmentStatus" class="form-control" required tabindex="5">
+                                    <option value="Noted">📝 Noted</option>
+                                    <option value="Booked">✅ Booked</option>
+                                    <option value="Arrived">🙋 Arrived</option>
+                                    <option value="In Consult">💬 In Consult</option>
+                                    <option value="Investigation">🔬 Investigation</option>
+                                    <option value="Postpone">⏸️ Postpone</option>
+                                    <option value="Cancelled">❌ Cancelled</option>
+                                    <option value="Done">✔️ Done</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group full-width">
+                                <label for="appointmentNotes">Notes</label>
+                                <textarea
+                                    id="appointmentNotes"
+                                    class="form-control"
+                                    rows="2"
+                                    placeholder="Additional notes (optional)"
+                                    tabindex="6"
+                                ></textarea>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" id="appointmentSaveBtn" class="btn btn-primary">
+                                <span id="appointmentSaveBtnText">Save Appointment</span>
+                            </button>
+                            <button type="button" id="appointmentClearBtn" class="btn btn-secondary">
+                                Clear Form
+                            </button>
+                            <button type="button" id="appointmentDeleteBtn" class="btn btn-danger" style="display: none;">
+                                Delete Appointment
+                            </button>
+                            <button type="button" id="appointmentCancelBtn" class="btn btn-secondary">
+                                Cancel
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Investigation Decision Dialog -->
+        <div id="investigationDialog" class="investigation-dialog hidden">
+            <div class="investigation-dialog-content">
+                <div class="investigation-dialog-header">
+                    <h3>Consultation Decision</h3>
+                </div>
+                <div class="investigation-dialog-body">
+                    <div class="current-patient-info">
+                        <h4>Currently Consulting</h4>
+                        <p><strong>Name:</strong> <span id="consultPatientName">-</span></p>
+                        <p><strong>Age:</strong> <span id="consultPatientAge">-</span></p>
+                        <p><strong>Sex:</strong> <span id="consultPatientSex">-</span></p>
+                        <p><strong>Booking #:</strong> <span id="consultBookingNumber">-</span></p>
+                    </div>
+                    <p class="investigation-question">Does this patient need investigation?</p>
+                    <div class="investigation-dialog-actions">
+                        <button type="button" id="investigationYesBtn" class="btn btn-yes">YES</button>
+                        <button type="button" id="investigationNoBtn" class="btn btn-no">NO</button>
+                    </div>
+                    
+                    <!-- Patient Selection Section (shown after investigation decision) -->
+                    <div id="patientSelectionSection" class="patient-selection-section hidden" style="margin-top: 20px; border-top: 1px solid #e5e7eb; padding-top: 20px;">
+                        <h4 style="margin-bottom: 15px;">Select Next Patient</h4>
+                        
+                        <!-- Single Patient Display -->
+                        <div id="singlePatientDisplay" class="single-patient-display hidden">
+                            <div class="patient-card">
+                                <div class="patient-card-header">
+                                    <span class="patient-card-badge" id="nextPatientCategory">Arrived</span>
+                                    <span class="patient-card-booking" id="nextPatientBooking">#-</span>
+                                </div>
+                                <div class="patient-card-body">
+                                    <h3 id="selectedPatientName" style="margin: 0 0 10px 0; font-size: 1.3rem; color: var(--text-primary);">Patient Name</h3>
+                                    <div class="patient-card-details">
+                                        <span><strong>Age:</strong> <span id="nextPatientAge">-</span></span>
+                                        <span><strong>Sex:</strong> <span id="nextPatientSex">-</span></span>
+                                        <span><strong>Phone:</strong> <span id="nextPatientPhone">-</span></span>
+                                    </div>
+                                    <div id="nextPatientPenaltyInfo" class="penalty-info hidden" style="margin-top: 10px; padding: 8px; background-color: #fef2f2; border-radius: var(--radius); color: #dc2626; font-size: 0.9rem;">
+                                        ⚠️ <span id="nextPatientPenaltyText"></span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="patient-selection-actions" style="display: flex; gap: 10px; margin-top: 20px; justify-content: center;">
+                                <button type="button" id="skipPatientBtn" class="btn btn-skip" style="flex: 1; background-color: #6b7280; color: white;">⏭️ Skip</button>
+                                <button type="button" id="callPatientBtn" class="btn btn-call" style="flex: 1; background-color: var(--primary-color); color: white;">📢 Call This Patient</button>
+                            </div>
+                        </div>
+                        
+                        <!-- No Patients Message -->
+                        <div id="noPatientsMessage" class="no-patients-message hidden" style="text-align: center; padding: 30px 20px; color: #6b7280;">
+                            <div style="font-size: 3rem; margin-bottom: 10px;">📭</div>
+                            <p style="font-size: 1rem; margin: 0;">No arrived patients waiting for consultation</p>
+                        </div>
+                        
+                        <div class="investigation-dialog-actions" style="margin-top: 15px;">
+                            <button type="button" id="closePatientSelectionBtn" class="btn btn-cancel">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </section>
+
+    <!-- VIP Slot Selection Dialog (moved outside sections for global access) -->
+    <div id="vipSlotDialog" class="investigation-dialog hidden">
+        <div class="investigation-dialog-content" style="max-width: 500px;">
+            <div class="investigation-dialog-header">
+                <h3>🎫 VIP Slot Selection</h3>
+            </div>
+            <div class="investigation-dialog-body">
+                <div class="vip-slot-info">
+                    <p><strong>Patient:</strong> <span id="vipSlotPatientName">-</span></p>
+                    <p><strong>Regular Queue No:</strong> <span id="vipSlotRegularNumber" class="regular-number">-</span></p>
+                    <p class="vip-slot-instruction">Choose a VIP slot (must be less than regular number):</p>
+                </div>
+                <div id="vipSlotOptions" class="vip-slot-options">
+                    <!-- VIP slot buttons will be generated here -->
+                </div>
+                <div class="vip-slot-actions">
+                    <button type="button" id="vipSlotUseRegularBtn" class="btn btn-primary" style="flex: 1;">Use Regular Number</button>
+                    <button type="button" id="vipSlotCancelBtn" class="btn btn-cancel" style="flex: 1;">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Instructions Section -->
+    <section id="instructionSection" class="module-section hidden">
+        <!-- Header -->
+        <div class="header">
+            <h2>Doctor Instructions</h2>
+            <p class="subtitle">Record follow-up instructions for completed consultations</p>
+        </div>
+
+        <!-- Done/Postpone Patients Table -->
+        <section class="table-section">
+            <div class="table-header">
+                <h2>Patients Needing Instructions</h2>
+                <div class="table-header-actions">
+                    <span id="donePatientCount" class="record-count">0 patients</span>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="toolbar">
+                <div class="search-container">
+                    <input type="text" id="instructionSearchInput" class="search-input" placeholder="Search by patient name..." autocomplete="off">
+                    <span class="search-icon">🔍</span>
+                </div>
+                <select id="instructionDoctorFilter" class="form-control filter-input">
+                    <option value="">All Doctors</option>
+                </select>
+                <select id="instructionSortFilter" class="form-control filter-input">
+                    <option value="newest">Newest First</option>
+                    <option value="oldest">Oldest First</option>
+                </select>
+            </div>
+
+            <div class="table-wrapper">
+                <table id="instructionTable">
+                    <thead>
+                        <tr>
+                            <th>Patient Name</th>
+                            <th>Age</th>
+                            <th>Doctor Name</th>
+                            <th>Appointment Date</th>
+                            <th>Booking #</th>
+                            <th>Instruction</th>
+                        </tr>
+                    </thead>
+                    <tbody id="instructionTableBody">
+                        <!-- Rows will be inserted here -->
+                    </tbody>
+                </table>
+                <div id="instructionEmptyMessage" class="empty-message">
+                    <p>No patients needing instructions.</p>
+                    <p style="font-size: 0.9rem; color: var(--text-secondary);">Patients will appear here after their appointment status is set to "Done" or "Postpone".</p>
+                </div>
+            </div>
+        </section>
+    </section>
+
+    <!-- Instruction Form Slide Panel -->
+    <div id="instructionFormPanel" class="slide-panel hidden" >
+        <div class="slide-panel-overlay"></div>
+        <div class="slide-panel-content">
+            <div class="slide-panel-header" >
+                <button type="button" id="closeInstructionPanel" class="slide-panel-close" >&times;</button>
+                <h3>Add Doctor Instruction</h3>
+            </div>
+            <div class="slide-panel-body">
+                <form id="instructionForm">
+                    <!-- Patient Information (Read-only) -->
+                    <div class="form-section-title">Patient Information</div>
+                    <div class="form-row">
+                        <div class="instruction-form-group">
+                            <label>Patient Name</label>
+                            <input type="text" id="instructPatientName" class="form-control" readonly tabindex="-1">
+                        </div>
+                        <div class="instruction-form-group">
+                            <label>Age</label>
+                            <input type="text" id="instructPatientAge" class="form-control" readonly tabindex="-1">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="instruction-form-group">
+                            <label>Doctor Name</label>
+                            <input type="text" id="instructDoctorName" class="form-control" readonly tabindex="-1">
+                        </div>
+                        <div class="instruction-form-group">
+                            <label>Appointment Date</label>
+                            <input type="text" id="instructAppointmentDate" class="form-control" readonly tabindex="-1">
+                        </div>
+                    </div>
+                    <div class="instruction-form-group">
+                        <label>Booking Number</label>
+                        <input type="text" id="instructBookingNumber" class="form-control" readonly tabindex="-1">
+                    </div>
+
+                    <input type="hidden" id="instructAppointmentId">
+                    <input type="hidden" id="instructPatientId">
+
+                    <!-- Instruction Fields -->
+                    <div class="form-section-title">Instruction Details</div>
+                    
+                    <!-- General Instruction -->
+                    <div class="instruction-form-group">
+                        <label>General Instruction</label>
+                        <textarea id="instructGeneralInstruction" class="form-control" rows="3" placeholder="e.g., Continue medication, Lifestyle advice, Reduce salt intake"></textarea>
+                    </div>
+
+                    <!-- Return Visit Duration -->
+                    <div class="instruction-form-group">
+                        <label>Return Visit Duration</label>
+                        <div class="form-row" style="gap: 10px; align-items: flex-end;">
+                            <div class="instruction-form-group" style="flex: 1;">
+                                <label style="font-size: 0.75rem;">Return after</label>
+                                <input type="number" id="instructDuration" class="form-control" placeholder="XXX" min="1">
+                            </div>
+                            <div class="instruction-form-group" style="flex: 0 0 100px;">
+                                <label style="font-size: 0.75rem;">Unit</label>
+                                <select id="instructDurationUnit" class="form-control">
+                                    <option value="Days">Days</option>
+                                    <option value="Weeks">Weeks</option>
+                                    <option value="Months">Months</option>
+                                </select>
+                            </div>
+                        </div>
+                        <!-- Quick Duration Buttons -->
+                        <div class="quick-duration-buttons" style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-secondary btn-sm quick-duration-btn" data-duration="1" data-unit="Weeks">1 week</button>
+                            <button type="button" class="btn btn-secondary btn-sm quick-duration-btn" data-duration="2" data-unit="Weeks">2 weeks</button>
+                            <button type="button" class="btn btn-secondary btn-sm quick-duration-btn" data-duration="1" data-unit="Months">1 month</button>
+                            <button type="button" class="btn btn-secondary btn-sm quick-duration-btn" data-duration="3" data-unit="Months">3 months</button>
+                        </div>
+                    </div>
+
+                    <!-- Next Appointment Date -->
+                    <div class="instruction-form-group">
+                        <label>Next Appointment Date</label>
+                        <input type="date" id="instructNextAppointmentDate" class="form-control">
+                    </div>
+
+                    <!-- Follow-up Doctor -->
+                    <div class="instruction-form-group">
+                        <label>Follow-up Doctor</label>
+                        <input type="text" id="instructNextDoctor" class="form-control" list="doctorDatalist" placeholder="Type or select doctor">
+                        <datalist id="doctorDatalist"></datalist>
+                        <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 5px;">Type new doctor name to add</p>
+                    </div>
+
+                    <!-- Other Instruction Type -->
+                    <div class="instruction-form-group">
+                        <label>Other Instruction</label>
+                        <select id="instructOtherType" class="form-control">
+                            <option value="">-- Select --</option>
+                            <option value="PRN">P.R.N (As Needed)</option>
+                            <option value="Transfer to Hospital">Transfer to Hospital</option>
+                            <option value="After Results">After Results</option>
+                            <option value="Do Tests Before">Do Tests Before</option>
+                        </select>
+                    </div>
+
+                    <!-- Transfer Hospital Input (appears for Transfer to Hospital) -->
+                    <div class="instruction-form-group hidden" id="transferHospitalGroup">
+                        <label>Hospital Name</label>
+                        <input type="text" id="instructTransferHospital" class="form-control" list="hospitalDatalist" placeholder="Type or select hospital">
+                        <datalist id="hospitalDatalist"></datalist>
+                    </div>
+
+                    <!-- Test Selection (appears for After Results / Do Tests Before) -->
+                    <div class="instruction-form-group hidden" id="testSelectionGroup">
+                        <label>Select Tests</label>
+                        <div class="test-checkboxes" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <label class="checkbox-label" style="font-size: 0.85rem;">
+                                <input type="checkbox" class="test-checkbox" value="Blood Test"> Blood Test
+                            </label>
+                            <label class="checkbox-label" style="font-size: 0.85rem;">
+                                <input type="checkbox" class="test-checkbox" value="C&S Results"> C&S Results
+                            </label>
+                            <label class="checkbox-label" style="font-size: 0.85rem;">
+                                <input type="checkbox" class="test-checkbox" value="USG"> USG
+                            </label>
+                            <label class="checkbox-label" style="font-size: 0.85rem;">
+                                <input type="checkbox" class="test-checkbox" value="Echo"> Echo
+                            </label>
+                            <label class="checkbox-label" style="font-size: 0.85rem;">
+                                <input type="checkbox" class="test-checkbox" value="ECG"> ECG
+                            </label>
+                            <label class="checkbox-label" style="font-size: 0.85rem;">
+                                <input type="checkbox" class="test-checkbox" value="Xray"> X-ray
+                            </label>
+                            <label class="checkbox-label" style="font-size: 0.85rem;">
+                                <input type="checkbox" class="test-checkbox" value="CT"> CT
+                            </label>
+                            <label class="checkbox-label" style="font-size: 0.85rem;">
+                                <input type="checkbox" class="test-checkbox" value="MRI"> MRI
+                            </label>
+                            <label class="checkbox-label" style="font-size: 0.85rem;">
+                                <input type="checkbox" class="test-checkbox" value="Other"> Other
+                            </label>
+                        </div>
+                        <!-- Custom Test Input -->
+                        <div class="instruction-form-group hidden" id="customTestGroup" style="margin-top: 10px;">
+                            <label>Custom Test Name</label>
+                            <input type="text" id="instructCustomTest" class="form-control" list="customTestDatalist" placeholder="Type custom test name">
+                            <datalist id="customTestDatalist"></datalist>
+                            <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 5px;">Custom test names will be saved for future use</p>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="form-actions">
+                        <button type="submit" id="instructSaveBtn" class="btn btn-primary">Save Instruction</button>
+                        <button type="button" id="instructDeleteBtn" class="btn btn-danger hidden">🗑️ Delete</button>
+                        <button type="button" id="instructCancelBtn" class="btn btn-secondary">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar View Section -->
+    <section id="calendarSection" class="module-section hidden">
+        <!-- Calendar Header -->
+        <div class="calendar-header" style="padding: 16px 20px; background: white; border-bottom: 1px solid #e5e7eb;">
+            <div class="calendar-header-top" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                <h2 style="margin: 0; font-size: 1.25rem; font-weight: 600;">🗓️ Calendar View</h2>
+                <div class="calendar-status">
+                    <span id="connectionStatus" class="status-indicator online" title="Online"></span>
+                </div>
+            </div>
+
+            <!-- Calendar Navigation -->
+            <div class="calendar-nav" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                <div class="calendar-nav-left" style="display: flex; align-items: center; gap: 8px;">
+                    <button type="button" id="calPrevMonth" class="btn btn-secondary btn-sm" title="Previous Month">←</button>
+                    <button type="button" id="calTodayBtn" class="btn btn-secondary btn-sm">Today</button>
+                    <button type="button" id="calNextMonth" class="btn btn-secondary btn-sm" title="Next Month">→</button>
+                    <h3 id="calCurrentMonthYear" style="margin: 0; font-size: 1.1rem; font-weight: 600;"></h3>
+                </div>
+            </div>
+
+            <!-- Filters Bar -->
+            <div class="calendar-filters" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                <select id="calFilterDoctor" class="form-control" style="min-width: 150px; font-size: 0.875rem;">
+                    <option value="">All Doctors</option>
+                </select>
+                <select id="calFilterType" class="form-control" style="min-width: 150px; font-size: 0.875rem;">
+                    <option value="">All Types</option>
+                    <option value="follow-up">Follow-up Visits</option>
+                    <option value="tests-before">Tests Before Visit</option>
+                    <option value="pending">Pending Tests</option>
+                    <option value="todo">TODO (No Date)</option>
+                </select>
+                <button type="button" id="calClearFilters" class="btn btn-secondary btn-sm">Clear</button>
+            </div>
+        </div>
+
+        <!-- Legend -->
+        <div class="calendar-legend" style="display: flex; gap: 16px; padding: 10px 20px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 0.8rem; flex-wrap: wrap;">
+            <div class="legend-item" style="display: flex; align-items: center; gap: 6px;">
+                <span style="width: 12px; height: 12px; background: #3b82f6; border-radius: 3px;"></span>
+                <span style="color: #6b7280;">Follow-up</span>
+            </div>
+            <div class="legend-item" style="display: flex; align-items: center; gap: 6px;">
+                <span style="width: 12px; height: 12px; background: #f97316; border-radius: 3px;"></span>
+                <span style="color: #6b7280;">Tests Before</span>
+            </div>
+            <div class="legend-item" style="display: flex; align-items: center; gap: 6px;">
+                <span style="width: 12px; height: 12px; background: #f59e0b; border-radius: 3px;"></span>
+                <span style="color: #6b7280;">Pending Tests</span>
+            </div>
+            <div class="legend-item" style="display: flex; align-items: center; gap: 6px;">
+                <span style="width: 12px; height: 12px; background: #a855f7; border-radius: 3px;"></span>
+                <span style="color: #6b7280;">TODO</span>
+            </div>
+        </div>
+
+        <!-- Calendar Grid -->
+        <div class="calendar-grid-container" style="flex: 1; overflow: auto; padding: 0;">
+            <div id="calDaysGrid" class="calendar-days-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: auto; background: white;">
+                <!-- Day headers (Sun, Mon, Tue, etc.) will be inserted here by JS -->
+                <!-- Days will be populated by JS -->
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="calLoading" class="loading-indicator" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50); background: rgba(255,255,255,0.95); padding: 20px 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; text-align: center;">
+            <div class="spinner" style="width: 30px; height: 30px; border: 3px solid #e5e7eb; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 10px;"></div>
+            <p style="margin: 0; color: #6b7280; font-size: 0.875rem;">Loading calendar data...</p>
+        </div>
+
+        <!-- Calendar Appointment Form (Slide Panel) -->
+        <div id="calendarAppointmentFormPanel" class="slide-panel hidden">
+            <div class="slide-panel-backdrop"></div>
+            <div class="slide-panel-content">
+                <div class="slide-panel-header">
+                    <h2 id="calendarApptFormTitle">New Appointment</h2>
+                    <button type="button" id="closeCalendarApptForm" class="slide-panel-close">&times;</button>
+                </div>
+                <div class="slide-panel-body">
+                    <form id="calendarAppointmentForm">
+                        <input type="hidden" id="calendarApptEditIndex" value="">
+                        <input type="hidden" id="calendarApptId" value="">
+
+                        <div class="form-row">
+                            <div class="form-group full-width">
+                                <label for="calendarApptPatient">Patient Name <span class="required">*</span></label>
+                                <div class="autocomplete-wrapper">
+                                    <input
+                                        type="text"
+                                        id="calendarApptPatient"
+                                        class="form-control"
+                                        required
+                                        placeholder="Start typing patient name..."
+                                        autocomplete="off"
+                                        tabindex="1"
+                                        inputmode="text"
+                                    >
+                                    <div id="calendarPatientAutocomplete" class="autocomplete-dropdown hidden"></div>
+                                    <button type="button" id="registerNewPatientFromCalendar" class="input-action-btn" title="Register New Patient">
+                                        + Patient
+                                    </button>
+                                </div>
+                                <input type="hidden" id="calendarApptPatientId" value="">
+                            </div>
+                        </div>
+
+                        <div class="form-row patient-info-display" id="calendarPatientInfoDisplay" style="display: none;">
+                            <div class="form-group">
+                                <label>Patient Age</label>
+                                <input type="text" id="calendarDisplayPatientAge" class="form-control" readonly tabindex="-1">
+                            </div>
+                            <div class="form-group">
+                                <label>Patient Sex</label>
+                                <input type="text" id="calendarDisplayPatientSex" class="form-control" readonly tabindex="-1">
+                            </div>
+                            <div class="form-group">
+                                <label>Patient Phone</label>
+                                <input type="text" id="calendarDisplayPatientPhone" class="form-control" readonly tabindex="-1">
+                            </div>
+                            <div class="form-group">
+                                <label>FOC Status</label>
+                                <input type="text" id="calendarDisplayPatientFoc" class="form-control" readonly tabindex="-1" style="font-weight: 500;">
+                            </div>
+                        </div>
+
+                        <!-- Lab Result Warning -->
+                        <div id="calendarLabResultWarning" class="lab-result-warning hidden" style="background-color: #fef3c7; border: 1px solid #fbbf24; border-radius: var(--radius); padding: 15px; margin-bottom: 15px;">
+                            <div style="display: flex; align-items: start; gap: 10px;">
+                                <span style="font-size: 1.5rem;">⚠️</span>
+                                <div style="flex: 1;">
+                                    <strong style="color: #92400e;">Lab Result Ready</strong>
+                                    <p style="margin: 5px 0; font-size: 0.9rem; color: #b45309;">Patient has pending lab results that have not been collected.</p>
+                                    <div id="calendarLabWarningDetails" style="margin-top: 10px; font-size: 0.85rem;"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group full-width">
+                                <label for="calendarApptDoctor">Doctor Name <span class="required">*</span></label>
+                                <div class="autocomplete-wrapper">
+                                    <input
+                                        type="text"
+                                        id="calendarApptDoctor"
+                                        class="form-control"
+                                        required
+                                        placeholder="Start typing doctor name..."
+                                        autocomplete="off"
+                                        tabindex="2"
+                                        inputmode="text"
+                                    >
+                                    <div id="calendarDoctorAutocomplete" class="autocomplete-dropdown hidden"></div>
+                                </div>
+                                <input type="hidden" id="calendarApptDoctorId" value="">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="calendarApptDateTime">Date & Time <span class="required">*</span></label>
+                                <input
+                                    type="datetime-local"
+                                    id="calendarApptDateTime"
+                                    class="form-control"
+                                    required
+                                    tabindex="3"
+                                >
+                            </div>
+                            <div class="form-group">
+                                <label for="calendarApptBookingType">Booking Type <span class="required">*</span></label>
+                                <select id="calendarApptBookingType" class="form-control" required tabindex="4">
+                                    <option value="">Select Type</option>
+                                    <option value="Emergency">🚨 Emergency</option>
+                                    <option value="VIP">⭐ VIP</option>
+                                    <option value="Regular">📋 Regular</option>
+                                    <option value="FOC">💝 FOC</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="calendarApptBookingNumber">Booking Number</label>
+                                <input
+                                    type="text"
+                                    id="calendarApptBookingNumber"
+                                    class="form-control"
+                                    readonly
+                                    tabindex="-1"
+                                >
+                            </div>
+                            <div class="form-group">
+                                <label for="calendarApptStatus">Status <span class="required">*</span></label>
+                                <select id="calendarApptStatus" class="form-control" required tabindex="5">
+                                    <option value="Noted">📝 Noted</option>
+                                    <option value="Booked">✅ Booked</option>
+                                    <option value="Arrived">🙋 Arrived</option>
+                                    <option value="In Consult">💬 In Consult</option>
+                                    <option value="Investigation">🔬 Investigation</option>
+                                    <option value="Postpone">⏸️ Postpone</option>
+                                    <option value="Cancelled">❌ Cancelled</option>
+                                    <option value="Done">✔️ Done</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group full-width">
+                                <label for="calendarApptNotes">Notes</label>
+                                <textarea
+                                    id="calendarApptNotes"
+                                    class="form-control"
+                                    rows="2"
+                                    placeholder="Additional notes (optional)"
+                                    tabindex="6"
+                                ></textarea>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" id="calendarApptSaveBtn" class="btn btn-primary">
+                                <span id="calendarApptSaveBtnText">Save Appointment</span>
+                            </button>
+                            <button type="button" id="calendarApptClearBtn" class="btn btn-secondary">
+                                Clear Form
+                            </button>
+                            <button type="button" id="calendarApptDeleteBtn" class="btn btn-danger" style="display: none;">
+                                Delete Appointment
+                            </button>
+                            <button type="button" id="cancelCalendarApptForm" class="btn btn-secondary">
+                                Cancel
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <style>
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        /* Calendar appointment form styles */
+        #calendarAppointmentFormPanel .slide-panel-content {
+            max-width: 600px;
+        }
+        #calendarAppointmentFormPanel .slide-panel-header h2 {
+            font-size: 1.1rem;
+        }
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-indicator.online {
+            background-color: #10b981;
+        }
+        .status-indicator.offline {
+            background-color: #ef4444;
+        }
+        .cal-day-cell {
+            border-right: 1px solid #e5e7eb;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 6px;
+            min-height: 100px;
+            background-color: #ffffff;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .cal-day-header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background-color: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 10px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 0.75rem;
+            color: #6b7280;
+            text-transform: uppercase;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: box-shadow 0.2s;
+        }
+        /* Remove right border from Saturday cells (every 7th cell starting from cell 7) */
+        .cal-day-cell:nth-child(7n) {
+            border-right: none;
+        }
+        .cal-day-cell.other-month {
+            background-color: #f9fafb;
+            color: #9ca3af;
+        }
+        .cal-day-cell.today {
+            background-color: #eff6ff;
+        }
+        .cal-day-number {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: #374151;
+            margin-bottom: 3px;
+        }
+        .cal-day-cell.other-month .cal-day-number {
+            color: #9ca3af;
+        }
+        .cal-day-cell.today .cal-day-number {
+            font-weight: 700;
+            color: #3b82f6;
+        }
+        .cal-day-events {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            overflow: hidden;
+        }
+        .cal-event {
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 2px solid;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .cal-event:hover {
+            transform: translateX(2px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .cal-event.follow-up {
+            background-color: #dbeafe;
+            border-left-color: #3b82f6;
+            color: #1e40af;
+        }
+        .cal-event.tests-before {
+            background-color: #ffedd5;
+            border-left-color: #f97316;
+            color: #c2410c;
+        }
+        .cal-event.after-results {
+            background-color: #d1fae5;
+            border-left-color: #10b981;
+            color: #065f46;
+        }
+        .cal-event.imaging-pending {
+            background-color: #ede9fe;
+            border-left-color: #8b5cf6;
+            color: #5b21b6;
+        }
+        .cal-event.todo {
+            background-color: #f3e8ff;
+            border-left-color: #a855f7;
+            color: #6b21a8;
+        }
+        .cal-event.pending {
+            background-color: #fef3c7;
+            border-left-color: #f59e0b;
+            color: #92400e;
+        }
+        .cal-event-doctor {
+            font-weight: 600;
+            display: block;
+        }
+        .cal-more-events {
+            font-size: 0.65rem;
+            color: #6b7280;
+            padding: 2px 4px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .cal-more-events:hover {
+            color: #3b82f6;
+        }
+    </style>
+
+    <!-- Expenses Section -->
+    <section id="expenseSection" class="module-section hidden">
+        <!-- Header -->
+        <div class="header">
+            <h2>Clinic Expenses</h2>
+            <p class="subtitle">Record and analyze clinic expenses</p>
+        </div>
+
+        <!-- Category Monthly Summary -->
+        <section class="table-section" style="margin-bottom: 20px;">
+            <div class="table-header">
+                <h3>Monthly Summary</h3>
+                <div class="table-header-actions">
+                    <button type="button" id="addExpenseBtn" class="btn btn-primary btn-sm">+ Add New Expense</button>
+                    <select id="expenseMonthFilter" class="form-control" style="width: 150px;">
+                        <option value="">Select Month</option>
+                    </select>
+                </div>
+            </div>
+            <div id="categorySummaryContainer" class="category-summary">
+                <p style="color: var(--text-secondary); text-align: center;">Select a month to view summary</p>
+            </div>
+        </section>
+
+        <!-- Expense Data Table -->
+        <section class="table-section">
+            <div class="table-header">
+                <h2>Expense Records</h2>
+                <div class="table-header-actions">
+                    <span id="expenseTotalCount" class="record-count">0 records</span>
+                    <select id="expenseDateFilter" class="form-control filter-input">
+                        <option value="all">All Time</option>
+                        <option value="today">Today</option>
+                        <option value="week">This Week</option>
+                        <option value="month">This Month</option>
+                        <option value="custom">Custom Range</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Custom Date Range Picker -->
+            <div id="customDateRange" class="hidden" style="margin-bottom: 15px; display: flex; gap: 10px; align-items: flex-end;">
+                <div class="form-group">
+                    <label>From</label>
+                    <input type="date" id="customDateFrom" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>To</label>
+                    <input type="date" id="customDateTo" class="form-control">
+                </div>
+                <button type="button" id="applyDateRangeBtn" class="btn btn-primary">Apply</button>
+            </div>
+
+            <div class="table-wrapper">
+                <div id="expenseTableContainer">
+                    <!-- Expense records grouped by date will be inserted here -->
+                </div>
+                <div id="expenseEmptyMessage" class="empty-message">
+                    <p>No expense records yet.</p>
+                </div>
+            </div>
+        </section>
+    </section>
+
+    <!-- Category Details Dialog -->
+    <div id="categoryDetailsDialog" class="investigation-dialog hidden">
+        <div class="investigation-dialog-content" style="max-width: 600px;">
+            <div class="investigation-dialog-header">
+                <h3 id="categoryDetailsTitle">Category Details</h3>
+                <button type="button" id="closeCategoryDetails" class="modal-close">&times;</button>
+            </div>
+            <div class="investigation-dialog-body" id="categoryDetailsContent">
+                <!-- Category details will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Lab Tracker Section -->
+    <section id="labTrackerSection" class="module-section hidden">
+        <!-- Header -->
+        <div class="header">
+            <h2>Lab Tracking System</h2>
+            <p class="subtitle">Track laboratory tests from order to result collection</p>
+        </div>
+
+        <!-- Pending Results Alert -->
+        <div id="pendingResultsAlert" class="pending-results-alert hidden">
+            <div class="alert-icon">⚠️</div>
+            <div class="alert-content">
+                <strong>Pending Results</strong>
+                <span id="pendingResultsCount">0</span> lab results ready but not collected
+            </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+            <div class="search-container">
+                <input type="text" id="labSearchInput" class="search-input" placeholder="Search by patient name..." autocomplete="off">
+                <span class="search-icon">🔍</span>
+            </div>
+            <select id="labFilterStatus" class="form-control filter-input">
+                <option value="">All Status</option>
+                <option value="Sent to Lab">Sent to Lab</option>
+                <option value="Partial Result Out">Partial Result Out</option>
+                <option value="Complete Result Out">Complete Result Out</option>
+                <option value="Inform to Doctor">Inform to Doctor</option>
+                <option value="Inform to Patient">Inform to Patient</option>
+                <option value="Patient Received">Patient Received</option>
+            </select>
+            <select id="labFilterLab" class="form-control filter-input">
+                <option value="">All Labs</option>
+                <option value="TWOK">TWOK</option>
+                <option value="NN">NN</option>
+                <option value="YN">YN</option>
+                <option value="BH">BH</option>
+            </select>
+            <button type="button" id="addLabTrackerBtn" class="btn btn-primary new-record-btn">
+                + Add Lab Tracker
+            </button>
+        </div>
+
+        <!-- Lab Records Table -->
+        <section class="table-section">
+            <div class="table-header">
+                <h2>Lab Records</h2>
+                <div class="table-header-actions">
+                    <span id="labRecordCount" class="record-count">0 records</span>
+                    <input type="date" id="labFilterDate" class="form-control filter-input" title="Filter by date">
+                </div>
+            </div>
+
+            <div class="table-wrapper">
+                <table id="labTrackerTable">
+                    <thead>
+                        <tr>
+                            <th>Lab ID</th>
+                            <th>Patient Name</th>
+                            <th>Doctor</th>
+                            <th>Lab Name</th>
+                            <th>Amount</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="labTrackerTableBody">
+                        <!-- Lab records will be inserted here -->
+                    </tbody>
+                </table>
+                <div id="labEmptyMessage" class="empty-message">
+                    <p>No lab records yet.</p>
+                    <p style="font-size: 0.9rem; color: var(--text-secondary);">Lab records are created automatically when adding Lab expenses, or manually using the "Add Lab Tracker" button.</p>
+                </div>
+            </div>
+        </section>
+    </section>
+
+    <!-- Pharmacist Corner Section -->
+    <section id="pharmacistSection" class="module-section hidden">
+        <!-- Header Statistics -->
+        <div class="header">
+            <h2>💊 Pharmacist Corner</h2>
+            <p class="subtitle">Post-consultation workflow management</p>
+        </div>
+
+        <!-- Statistics Cards -->
+        <div class="pharmacist-stats">
+            <div class="stat-card">
+                <div class="stat-value" id="pharmacistTotalPatients">0</div>
+                <div class="stat-label">Total Patients</div>
+            </div>
+            <div class="stat-card pending">
+                <div class="stat-value" id="pharmacistPendingCount">0</div>
+                <div class="stat-label">Pending</div>
+            </div>
+            <div class="stat-card completed">
+                <div class="stat-value" id="pharmacistCompletedCount">0</div>
+                <div class="stat-label">Completed</div>
+            </div>
+            <div class="stat-card queued">
+                <div class="stat-value" id="pharmacistQueuedCount">0</div>
+                <div class="stat-label">Queued for Sync</div>
+            </div>
+        </div>
+
+        <!-- Toolbar with Search and Filters -->
+        <div class="toolbar">
+            <div class="search-container">
+                <input
+                    type="text"
+                    id="pharmacistSearchInput"
+                    class="search-input"
+                    placeholder="Search by patient name or booking number..."
+                    autocomplete="off"
+                >
+                <span class="search-icon">🔍</span>
+            </div>
+            <div class="filter-buttons">
+                <button type="button" class="filter-btn active" data-filter="all">All</button>
+                <button type="button" class="filter-btn" data-filter="pending">Pending</button>
+                <button type="button" class="filter-btn" data-filter="completed">Completed</button>
+            </div>
+        </div>
+
+        <!-- No Results Message -->
+        <div id="pharmacistNoResultsMessage" class="no-results hidden">
+            <p>No patients found matching your search.</p>
+        </div>
+
+        <!-- Patient Cards Container -->
+        <div id="pharmacistCardsContainer" class="pharmacist-cards">
+            <!-- Patient cards will be inserted here dynamically -->
+        </div>
+
+        <!-- Empty State -->
+        <div id="pharmacistEmptyState" class="empty-state hidden">
+            <div class="empty-state-icon">💊</div>
+            <h3>No Completed Consultations Today</h3>
+            <p>Patients with "Done" status will appear here for instruction and expense recording.</p>
+        </div>
+    </section>
+
+    <!-- Settings Section -->
+    <section id="settingsSection" class="module-section hidden">
+        <!-- Header -->
+        <div class="header">
+            <h2>Settings</h2>
+            <p class="subtitle">Configure appointment booking behavior for Dr. Soe Chan Myae</p>
+        </div>
+
+        <!-- Section 1: Manual Booking Number Editor -->
+        <section class="settings-card">
+            <div class="settings-card-header">
+                <h3>📋 Manual Booking Number Editor</h3>
+                <p class="settings-card-description">Adjust booking numbers for specific appointments when needed.</p>
+            </div>
+            <div class="settings-card-body">
+                <div class="booking-editor-controls">
+                    <div class="form-group">
+                        <label for="bookingEditorDate">Select Date</label>
+                        <input type="date" id="bookingEditorDate" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>Doctor</label>
+                        <input type="text" class="form-control" value="Dr. Soe Chan Myae" readonly style="background-color: #f5f5f5;">
+                    </div>
+                    <button type="button" id="loadAppointmentsBtn" class="btn btn-primary">Load Appointments</button>
+                </div>
+
+                <div id="bookingEditorTableContainer" class="table-container hidden" style="margin-top: 20px;">
+                    <div class="table-header">
+                        <h4>Appointments for <span id="selectedDateDisplay"></span></h4>
+                        <button type="button" id="saveBookingChangesBtn" class="btn btn-primary btn-sm">Save Changes</button>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="bookingEditorTable">
+                            <thead>
+                                <tr>
+                                    <th>Booking Number</th>
+                                    <th>Patient Name</th>
+                                    <th>Age</th>
+                                    <th>Booking Type</th>
+                                    <th>Status</th>
+                                    <th>Arrival Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bookingEditorTableBody">
+                                <!-- Rows will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 2: VIP Reserved Numbers -->
+        <section class="settings-card">
+            <div class="settings-card-header">
+                <h3>🎫 VIP Reserved Numbers</h3>
+                <p class="settings-card-description">These numbers are reserved for VIP bookings and cannot be used by Regular or FOC patients.</p>
+            </div>
+            <div class="settings-card-body">
+                <div id="vipNumbersList" class="vip-numbers-list">
+                    <!-- VIP number items will be inserted here -->
+                </div>
+                <div class="vip-numbers-add">
+                    <div class="form-group" style="flex: 1;">
+                        <input type="number" id="newVipNumber" class="form-control" placeholder="Enter number (1-50)" min="1" max="50">
+                    </div>
+                    <button type="button" id="addVipNumberBtn" class="btn btn-primary">Add Number</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 3: Default Appointment Times by Day -->
+        <section class="settings-card">
+            <div class="settings-card-header">
+                <h3>⏰ Default Appointment Times (Dr. Soe Chan Myae)</h3>
+                <p class="settings-card-description">Set default appointment times and working days for Dr. Soe Chan Myae only. Other doctors are not affected by these settings.</p>
+            </div>
+            <div class="settings-card-body">
+                <div id="defaultTimesContainer" class="default-times-grid">
+                    <!-- Default time settings will be inserted here -->
+                </div>
+                <div style="margin-top: 20px; text-align: right;">
+                    <button type="button" id="saveDefaultTimesBtn" class="btn btn-primary">💾 Save Default Times</button>
+                </div>
+            </div>
+        </section>
+    </section>
+
+    <!-- Lab Form Modal -->
+    <div id="labFormModal" class="bottom-sheet hidden">
+        <div class="bottom-sheet-backdrop"></div>
+        <div class="bottom-sheet-content">
+            <div class="bottom-sheet-header">
+                <h2 id="labFormTitle">Add Lab Tracker</h2>
+                <button type="button" id="closeLabFormModal" class="bottom-sheet-close">&times;</button>
+            </div>
+            <div class="bottom-sheet-body">
+                <form id="labForm">
+                    <input type="hidden" id="labEditIndex" value="">
+                    <input type="hidden" id="labId" value="">
+
+                    <div class="form-row">
+                        <div class="form-group full-width">
+                            <label for="labPatient">Patient Name <span class="required">*</span></label>
+                            <div class="autocomplete-wrapper">
+                                <input type="text" id="labPatient" class="form-control" required placeholder="Start typing patient name..." autocomplete="off">
+                                <div id="labPatientAutocomplete" class="autocomplete-dropdown hidden"></div>
+                            </div>
+                            <input type="hidden" id="labPatientId" value="">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group full-width">
+                            <label for="labDoctor">Doctor Name <span class="required">*</span></label>
+                            <div class="autocomplete-wrapper">
+                                <input type="text" id="labDoctor" class="form-control" required placeholder="Start typing doctor name..." autocomplete="off">
+                                <div id="labDoctorAutocomplete" class="autocomplete-dropdown hidden"></div>
+                            </div>
+                            <input type="hidden" id="labDoctorId" value="">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="labName">Lab Name <span class="required">*</span></label>
+                            <input type="text" id="labName" class="form-control" list="labNameOptions" placeholder="Select or type lab name" required autocomplete="off">
+                            <datalist id="labNameOptions">
+                                <option value="TWOK">
+                                <option value="NN">
+                                <option value="YN">
+                                <option value="BH">
+                            </datalist>
+                        </div>
+                        <div class="form-group">
+                            <label for="labAmount">Amount <span class="required">*</span></label>
+                            <input type="number" id="labAmount" class="form-control" placeholder="e.g., 5000" min="1" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="labStatus">Status <span class="required">*</span></label>
+                            <select id="labStatus" class="form-control" required>
+                                <option value="">Select Status</option>
+                                <option value="Sent to Lab">Sent to Lab</option>
+                                <option value="Partial Result Out">Partial Result Out</option>
+                                <option value="Complete Result Out">Complete Result Out</option>
+                                <option value="Inform to Doctor">Inform to Doctor</option>
+                                <option value="Inform to Patient">Inform to Patient</option>
+                                <option value="Patient Received">Patient Received</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="labDateTime">Date & Time <span class="required">*</span></label>
+                            <input type="datetime-local" id="labDateTime" class="form-control" required>
+                        </div>
+                    </div>
+
+                    <!-- Pending Tests Field (shown only for Partial Result Out) -->
+                    <div id="pendingTestsSection" class="hidden" style="background-color: #fef3c7; padding: 15px; border-radius: var(--radius); border: 1px solid #fcd34d; margin-bottom: 15px;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="labPendingTests">Pending Test Results <span class="required">*</span></label>
+                            <textarea id="labPendingTests" class="form-control" rows="3" placeholder="Enter which test results are still pending (e.g., Blood Test, X-Ray Report)"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" id="labSaveBtn" class="btn btn-primary">
+                            <span id="labSaveBtnText">Save Lab Record</span>
+                        </button>
+                        <button type="button" id="labClearBtn" class="btn btn-secondary">Clear</button>
+                        <button type="button" id="labDeleteBtn" class="btn btn-danger" style="display: none;">Delete</button>
+                        <button type="button" id="labCancelBtn" class="btn btn-secondary">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Timeline Dialog -->
+    <div id="timelineDialog" class="investigation-dialog hidden">
+        <div class="investigation-dialog-content" style="max-width: 420px;">
+            <div class="investigation-dialog-header">
+                <h3>Lab Test Timeline</h3>
+                <button type="button" id="closeTimelineDialog" class="modal-close">&times;</button>
+            </div>
+            <div class="investigation-dialog-body" style="max-height: 70vh; overflow-y: auto;">
+                <div id="timelinePatientInfo" class="timeline-patient-info">
+                    <!-- Patient info will be inserted here -->
+                </div>
+                <div id="timelineContent" class="timeline-content">
+                    <!-- Timeline events will be inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lab Result Ready Alert Dialog -->
+    <div id="labResultAlert" class="investigation-dialog hidden">
+        <div class="investigation-dialog-content" style="max-width: 450px;">
+            <div class="investigation-dialog-header">
+                <h3>🔬 Lab Result Ready</h3>
+                <button type="button" id="closeLabResultAlert" class="modal-close">&times;</button>
+            </div>
+            <div class="investigation-dialog-body">
+                <div id="labResultAlertContent">
+                    <!-- Alert content will be inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PWA Install Prompt -->
+    <div id="pwaInstallPrompt" class="pwa-install-prompt hidden">
+        <button type="button" id="pwaInstallPromptClose" class="pwa-install-prompt-close">&times;</button>
+        <div class="pwa-install-prompt-icon">📲</div>
+        <div class="pwa-install-prompt-content">
+            <div class="pwa-install-prompt-title">Install TWOK Clinic</div>
+            <div class="pwa-install-prompt-text">Install this app for quick access and offline support</div>
+        </div>
+        <div class="pwa-install-prompt-actions">
+            <button type="button" id="pwaInstallBtn" class="btn btn-primary">Install</button>
+            <button type="button" id="pwaDismissBtn" class="btn btn-secondary">Later</button>
+        </div>
+    </div>
+
+    <!-- Online/Offline Status Indicator -->
+    <div id="connectionStatus" class="connection-status online">🟢 Online</div>
+
+    <!-- Sync Status Indicator -->
+    <div id="syncStatus" class="sync-status hidden">🔄 Syncing...</div>
+
+    <!-- Module Scripts -->
+    <script type="module">
+        import { twokClinicApp, isOnline } from './js/app.js';
+        import { storageAdapter } from './js/storage/storageAdapter.js';
+        
+        // Expose app and storage adapter to window for legacy script.js access
+        window.twokClinicApp = twokClinicApp;
+        window.isOnline = isOnline;
+        window.storageAdapter = storageAdapter;
+        
+        // Initialize app on load
+        window.addEventListener('load', async () => {
+            try {
+                // Initialize storage adapter first
+                await storageAdapter.init();
+                
+                // Set storage adapter for TWOKDB (for backward compatibility with script.js)
+                if (window.TWOKDB && window.TWOKDB.setStorageAdapter) {
+                    window.TWOKDB.setStorageAdapter(storageAdapter);
+                }
+                
+                // Then initialize the main app
+                await twokClinicApp.init();
+                console.log('[App] TWOK Clinic initialized successfully');
+                
+                // Update UI based on sync status
+                twokClinicApp.on('sync', ({ event, data }) => {
+                    updateSyncStatusUI(event, data);
+                });
+                
+                // Listen for data refresh to reload UI
+                twokClinicApp.on('data-refresh', () => {
+                    if (window.loadAllData) {
+                        loadAllData();
+                    }
+                });
+                
+                // Initial data load
+                if (window.loadAllData) {
+                    await loadAllData();
+                }
+            } catch (error) {
+                console.error('[App] Initialization failed:', error);
+            }
+        });
+        
+        // Update sync status UI
+        function updateSyncStatusUI(event, data) {
+            const syncStatusEl = document.getElementById('syncStatus');
+            const connectionStatusEl = document.getElementById('connectionStatus');
+            
+            if (event === 'status-change') {
+                if (data.status === 'syncing') {
+                    syncStatusEl.classList.remove('hidden');
+                    syncStatusEl.textContent = '🔄 Syncing...';
+                } else if (data.status === 'synced') {
+                    syncStatusEl.classList.add('hidden');
+                } else if (data.status === 'error') {
+                    syncStatusEl.classList.remove('hidden');
+                    syncStatusEl.textContent = '⚠️ Sync Error';
+                    syncStatusEl.style.backgroundColor = '#fee2e2';
+                    syncStatusEl.style.color = '#b91c1c';
+                }
+            }
+            
+            if (event === 'queue-processed') {
+                syncStatusEl.classList.add('hidden');
+            }
+        }
+    </script>
+    
+    <!-- Legacy Script (will be refactored) -->
+    <script src="indexeddb.js"></script>
+    <script src="components/instruction-form.js"></script>
+    <script src="script.js"></script>
+    <script src="components/expense-form.js"></script>
+    <script>
+        // Register Service Worker for PWA
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then((registration) => {
+                        console.log('[SW] ServiceWorker registration successful:', registration.scope);
+                        
+                        // Check for install prompt
+                        registration.addEventListener('updatefound', () => {
+                            const newWorker = registration.installing;
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    // New content available
+                                    console.log('[SW] New content available');
+                                }
+                            });
+                        });
+                    })
+                    .catch((error) => {
+                        console.error('[SW] ServiceWorker registration failed:', error);
+                    });
+            });
+        }
+
+        // PWA Install Prompt Handling
+        let deferredPrompt = null;
+        const pwaInstallPrompt = document.getElementById('pwaInstallPrompt');
+        const pwaInstallBtn = document.getElementById('pwaInstallBtn');
+        const pwaDismissBtn = document.getElementById('pwaDismissBtn');
+        const pwaInstallPromptClose = document.getElementById('pwaInstallPromptClose');
+        const headerInstallBtn = document.getElementById('headerInstallBtn');
+        const connectionStatus = document.getElementById('connectionStatus');
+
+        // Listen for beforeinstallprompt event
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            // Show header install button
+            if (headerInstallBtn) {
+                headerInstallBtn.style.display = 'inline-flex';
+            }
+            // Show install prompt after 2 seconds
+            setTimeout(() => {
+                if (pwaInstallPrompt) {
+                    pwaInstallPrompt.classList.remove('hidden');
+                    setTimeout(() => {
+                        pwaInstallPrompt.classList.add('show');
+                    }, 10);
+                }
+            }, 2000);
+            console.log('[PWA] beforeinstallprompt event fired');
+        });
+
+        // Handle header install button click
+        if (headerInstallBtn) {
+            headerInstallBtn.addEventListener('click', async () => {
+                if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    const { outcome } = await deferredPrompt.userChoice;
+                    console.log('[PWA] User response to install prompt:', outcome);
+                    deferredPrompt = null;
+                    headerInstallBtn.style.display = 'none';
+
+                    if (outcome === 'accepted') {
+                        showNotification('Thank you for installing TWOK Clinic!', 'success');
+                    }
+                } else {
+                    // If no deferred prompt, show manual install instructions
+                    showNotification('To install: tap the menu (⋮) → "Install app" or "Add to Home screen"', 'info');
+                }
+            });
+        }
+
+        // Handle install button click
+        if (pwaInstallBtn) {
+            pwaInstallBtn.addEventListener('click', async () => {
+                if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    const { outcome } = await deferredPrompt.userChoice;
+                    console.log('[PWA] User response to install prompt:', outcome);
+                    deferredPrompt = null;
+                    hideInstallPrompt();
+
+                    if (outcome === 'accepted') {
+                        showNotification('Thank you for installing TWOK Clinic!');
+                    }
+                } else {
+                    // If no deferred prompt, show manual install instructions
+                    showNotification('To install: tap the menu (⋮) → "Install app" or "Add to Home screen"', 'info');
+                }
+            });
+        }
+
+        // Handle dismiss button click
+        if (pwaDismissBtn) {
+            pwaDismissBtn.addEventListener('click', hideInstallPrompt);
+        }
+
+        // Handle close button click
+        if (pwaInstallPromptClose) {
+            pwaInstallPromptClose.addEventListener('click', hideInstallPrompt);
+        }
+
+        function hideInstallPrompt() {
+            pwaInstallPrompt.classList.remove('show');
+            setTimeout(() => {
+                pwaInstallPrompt.classList.add('hidden');
+            }, 300);
+        }
+
+        // Listen for app installed event
+        window.addEventListener('appinstalled', () => {
+            console.log('[PWA] App installed successfully');
+            hideInstallPrompt();
+            deferredPrompt = null;
+            if (headerInstallBtn) {
+                headerInstallBtn.style.display = 'none';
+            }
+        });
+
+        // PWA Diagnostic: Check if all requirements are met
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                console.log('[PWA] Diagnostic:');
+                console.log('  - Service Worker supported:', 'serviceWorker' in navigator);
+                console.log('  - Manifest linked:', !!document.querySelector('link[rel="manifest"]'));
+                console.log('  - HTTPS context:', location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+                console.log('  - Icons available:', !!document.querySelector('link[rel="icon"]'));
+                console.log('  - Deferred prompt:', !!deferredPrompt);
+            }, 3000);
+        });
+
+        // Online/Offline status handling
+        function updateConnectionStatus() {
+            if (navigator.onLine) {
+                connectionStatus.textContent = '🟢 Online';
+                connectionStatus.className = 'connection-status online';
+            } else {
+                connectionStatus.textContent = '🔴 Offline';
+                connectionStatus.className = 'connection-status offline';
+                showNotification('You are offline. Some features may be limited.', 'error');
+            }
+        }
+
+        window.addEventListener('online', updateConnectionStatus);
+        window.addEventListener('offline', updateConnectionStatus);
+
+        // Initial check
+        updateConnectionStatus();
+    </script>
+</body>
+</html>

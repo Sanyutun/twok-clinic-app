@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test - TWOK Clinic</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+        .connecting { background: #fff3cd; color: #856404; }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        #log {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-entry { margin: 5px 0; }
+        .log-send { color: #0066cc; }
+        .log-receive { color: #28a745; }
+        .log-error { color: #dc3545; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Connection Test</h1>
+    
+    <div id="status" class="status connecting">Connecting...</div>
+    
+    <div>
+        <h3>Test Events:</h3>
+        <button onclick="sendTestEvent('patient_arrived')">Send Patient Arrived</button>
+        <button onclick="sendTestEvent('consultation_started')">Send Consultation Started</button>
+        <button onclick="sendTestEvent('consultation_finished')">Send Consultation Finished</button>
+        <button onclick="sendTestEvent('queue_update')">Send Queue Update</button>
+    </div>
+    
+    <div>
+        <h3>IndexedDB Test:</h3>
+        <button onclick="checkIndexedDB()">Check Appointments</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+    
+    <div id="log">
+        <div class="log-entry">Waiting for connection...</div>
+    </div>
+
+    <script src="indexeddb.js"></script>
+    <script>
+        const WS_URL = 'ws://localhost:9000';
+        let ws = null;
+        
+        function log(message, type = '') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function updateStatus(status) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = 'status ' + status;
+            statusDiv.textContent = status === 'connected' ? '✓ Connected' : 
+                                    status === 'disconnected' ? '✗ Disconnected' : 
+                                    '⟳ Connecting...';
+        }
+        
+        function connectWebSocket() {
+            try {
+                ws = new WebSocket(WS_URL);
+                
+                ws.onopen = () => {
+                    log('WebSocket connected', 'connected');
+                    updateStatus('connected');
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        log('Received: ' + data.type, 'receive');
+                    } catch (e) {
+                        log('Received raw: ' + event.data, 'receive');
+                    }
+                };
+                
+                ws.onclose = () => {
+                    log('WebSocket closed', 'error');
+                    updateStatus('disconnected');
+                    setTimeout(connectWebSocket, 3000);
+                };
+                
+                ws.onerror = (error) => {
+                    log('WebSocket error: ' + error, 'error');
+                };
+                
+            } catch (error) {
+                log('Failed to create WebSocket: ' + error, 'error');
+                updateStatus('disconnected');
+                setTimeout(connectWebSocket, 3000);
+            }
+        }
+        
+        function sendTestEvent(type) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Cannot send: WebSocket not connected', 'error');
+                return;
+            }
+            
+            const testData = {
+                type: type,
+                data: {
+                    test: true,
+                    bookingNumber: Math.floor(Math.random() * 50) + 1,
+                    patientName: 'Test Patient',
+                    timestamp: new Date().toISOString()
+                }
+            };
+            
+            ws.send(JSON.stringify(testData));
+            log('Sent: ' + type, 'send');
+        }
+        
+        async function checkIndexedDB() {
+            try {
+                const appointments = await TWOKDB.getAll(TWOKDB.STORES.APPOINTMENTS);
+                log('IndexedDB: Found ' + appointments.length + ' appointments', 'receive');
+                
+                // Show sample
+                if (appointments.length > 0) {
+                    const sample = appointments.slice(0, 3);
+                    sample.forEach(appt => {
+                        log(`  - ${appt.bookingNumber}: ${appt.patientName} (${appt.status}) on ${appt.appointmentTime?.split('T')[0]}`, 'receive');
+                    });
+                }
+            } catch (error) {
+                log('IndexedDB error: ' + error, 'error');
+            }
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '<div class="log-entry">Log cleared</div>';
+        }
+        
+        // Initialize
+        connectWebSocket();
+    </script>
+</body>
+</html>

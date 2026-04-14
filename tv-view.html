@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TWOK Clinic - Queue Display</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #ffffff;
+            color: #222;
+            min-height: 100vh;
+            padding: 30px;
+            overflow: hidden;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* Screen Containers */
+        .screen-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.8s ease-in-out, visibility 0.8s;
+        }
+
+        .screen.screen-visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e5e5e5;
+            margin-bottom: 25px;
+        }
+
+        .header-left {
+            flex: 1;
+        }
+
+        .doctor-name {
+            font-size: 40px;
+            font-weight: 700;
+            color: #222;
+            margin-bottom: 6px;
+            letter-spacing: -0.5px;
+        }
+
+        .queue-title {
+            font-size: 18px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .clock-container {
+            text-align: right;
+        }
+
+        .current-time {
+            font-size: 28px;
+            font-weight: 600;
+            color: #222;
+        }
+
+        .current-date {
+            font-size: 14px;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        /* Screen A - Consultation Layout */
+        .screen-a-layout {
+            display: grid;
+            grid-template-rows: auto 1fr;
+            gap: 25px;
+            height: 100%;
+        }
+
+        .consultation-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 25px;
+        }
+
+        /* Cards */
+        .card {
+            border-radius: 16px;
+            padding: 25px 30px;
+            text-align: center;
+            border: 1px solid #e5e5e5;
+        }
+
+        .card-label {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-weight: 600;
+        }
+
+        .card-number {
+            font-size: 80px;
+            font-weight: 700;
+            line-height: 1;
+            margin-bottom: 12px;
+            letter-spacing: -4px;
+        }
+
+        .card-name {
+            font-size: 32px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #222;
+        }
+
+        .card-age {
+            font-size: 20px;
+            color: #666;
+        }
+
+        .card-empty {
+            font-size: 24px;
+            color: #999;
+            padding: 60px 0;
+        }
+
+        /* Now Serving - Green */
+        .now-serving-card {
+            background: #f0fdf4;
+            border-color: #2ecc71;
+        }
+
+        .now-serving-card .card-number {
+            color: #2ecc71;
+        }
+
+        .now-serving-card .card-name {
+            color: #222;
+        }
+
+        .pulse-animation {
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 0 20px rgba(46, 204, 113, 0);
+            }
+        }
+
+        /* Next Patient - Orange */
+        .next-patient-card {
+            background: #fffbeb;
+            border-color: #f39c12;
+        }
+
+        .next-patient-card .card-number {
+            color: #f39c12;
+        }
+
+        .next-patient-card .card-name {
+            color: #222;
+        }
+
+        .slide-in {
+            animation: slideIn 0.5s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        /* Queue Progress */
+        .progress-section {
+            background: #f8f9fa;
+            border-radius: 16px;
+            padding: 20px 30px;
+            border: 1px solid #e5e5e5;
+        }
+
+        .progress-label {
+            font-size: 16px;
+            font-weight: 600;
+            color: #222;
+            margin-bottom: 12px;
+        }
+
+        .progress-bar-container {
+            height: 20px;
+            background: #e5e5e5;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #2ecc71, #27ae60);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+
+        .progress-text {
+            font-size: 16px;
+            color: #666;
+        }
+
+        .progress-text strong {
+            color: #222;
+        }
+
+        /* Screen B - Waiting Layout */
+        .screen-b-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            height: 100%;
+        }
+
+        .screen-b-page {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.8s ease-in-out, visibility 0.8s;
+        }
+
+        .screen-b-page.screen-b-visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .waiting-column {
+            background: #f8f9fa;
+            border-radius: 16px;
+            padding: 30px;
+            border: 1px solid #e5e5e5;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .column-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid #e5e5e5;
+        }
+
+        .column-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+        }
+
+        .column-dot.arrived {
+            background: #3498db;
+        }
+
+        .column-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #222;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Waiting Table */
+        .waiting-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .waiting-table th {
+            text-align: left;
+            padding: 10px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 2px solid #e5e5e5;
+        }
+
+        .waiting-table td {
+            padding: 14px 16px;
+            font-size: 22px;
+            border-bottom: 1px solid #e5e5e5;
+        }
+
+        .waiting-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .col-booking {
+            font-size: 28px !important;
+            font-weight: 700;
+            color: #3498db;
+            width: 100px;
+            text-align: center;
+        }
+
+        .col-name {
+            font-weight: 600;
+            color: #222;
+        }
+
+        .col-age {
+            color: #666;
+            width: 80px;
+        }
+
+        .col-time {
+            color: #888;
+            width: 100px;
+            text-align: right;
+        }
+
+        .col-penalty {
+            color: #e74c3c;
+            width: 90px;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .penalty-badge {
+            display: inline-block;
+            background: #e74c3c;
+            color: #fff;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 100px 20px;
+            color: #999;
+        }
+
+        .empty-state-text {
+            font-size: 28px;
+        }
+
+        /* Fullscreen Button */
+        .fullscreen-btn {
+            position: fixed;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ffffff;
+            border: 2px solid #e5e5e5;
+            color: #222;
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 18px;
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+
+        .fullscreen-btn:hover {
+            background: #f8f9fa;
+            border-color: #222;
+        }
+
+        /* Connection Status Indicator */
+        .connection-status {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: #ffffff;
+            border: 1px solid #e5e5e5;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #666;
+            z-index: 1000;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            transition: background 0.3s;
+        }
+
+        .status-dot.connected {
+            background: #2ecc71;
+        }
+
+        .status-dot.disconnected {
+            background: #e74c3c;
+        }
+
+        .status-dot.connecting {
+            background: #f39c12;
+            animation: blink 1s ease-in-out infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Responsive */
+        @media (max-width: 1400px) {
+            .doctor-name {
+                font-size: 40px;
+            }
+
+            .card-number {
+                font-size: 90px;
+            }
+
+            .card-name {
+                font-size: 36px;
+            }
+
+            .waiting-table td {
+                font-size: 24px;
+            }
+        }
+
+        @media (max-width: 1024px) {
+            body {
+                padding: 15px;
+            }
+
+            .doctor-name {
+                font-size: 32px;
+            }
+
+            .consultation-section {
+                grid-template-columns: 1fr;
+            }
+
+            .screen-b-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .card-number {
+                font-size: 80px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <button class="fullscreen-btn" onclick="toggleFullscreen()" title="Toggle Fullscreen">⛶</button>
+    <div class="connection-status">
+        <span class="status-dot connecting" id="connectionStatusDot"></span>
+        <span id="connectionStatusText">Connecting...</span>
+    </div>
+
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-left">
+                <h1 class="doctor-name">DR SOE CHAN MYAE</h1>
+                <p class="queue-title">Today Appointment Queue</p>
+            </div>
+            <div class="clock-container">
+                <div class="current-time" id="currentTime">--:--</div>
+                <div class="current-date" id="currentDate">--</div>
+            </div>
+        </div>
+
+        <!-- Screen Container -->
+        <div class="screen-container">
+            <!-- Screen A: Consultation View -->
+            <div class="screen screen-visible" id="screenA">
+            <div class="screen-a-layout">
+                <!-- Now Serving & Next Patient -->
+                <div class="consultation-section">
+                    <!-- Now Serving -->
+                    <div class="card now-serving-card pulse-animation">
+                        <h2 class="card-label">Now Serving</h2>
+                        <div id="nowServingContent">
+                            <div class="card-number" id="nowServingNumber">-</div>
+                            <div class="card-name" id="nowServingName">-</div>
+                            <div class="card-age" id="nowServingAge">- years</div>
+                        </div>
+                    </div>
+
+                    <!-- Next Patient -->
+                    <div class="card next-patient-card">
+                        <h2 class="card-label">Next Patient</h2>
+                        <div id="nextPatientContent">
+                            <div class="card-number slide-in" id="nextPatientNumber">-</div>
+                            <div class="card-name" id="nextPatientName">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Queue Progress -->
+                <div class="progress-section">
+                    <div class="progress-label">Queue Progress</div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+                    </div>
+                    <div class="progress-text" id="progressText">
+                        <strong>0</strong> / 0 patients completed
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Screen B: Waiting View (Container for dynamic pages) -->
+        <div class="screen" id="screenB">
+            <!-- Screen B pages will be dynamically generated here -->
+        </div>
+        </div>
+        <!-- End Screen Container -->
+
+        <!-- Empty State (inside screen container) -->
+        <div class="empty-state" id="emptyState" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1;">
+            <p class="empty-state-text">No appointments scheduled for today</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import { indexedDBStorage } from './js/storage/indexedDB.js';
+        
+        // Expose to global scope for legacy code
+        window.indexedDBStorage = indexedDBStorage;
+        
+        // Simple TWOKDB wrapper to use the same IndexedDB as main app
+        window.TWOKDB = {
+            STORES: {
+                APPOINTMENTS: 'appointments',
+                PATIENTS: 'patients',
+                DOCTORS: 'doctors'
+            },
+            getAll: async function(storeName) {
+                return await indexedDBStorage.getAll(storeName);
+            }
+        };
+
+        console.log('[TV] IndexedDB loaded successfully');
+    </script>
+    <script>
+        // Configuration
+        const TARGET_DOCTOR = 'Dr. Soe Chan Myae';
+        const SCREEN_SWITCH_INTERVAL = 10000; // 10 seconds
+        const WS_URL = 'ws://localhost:9000';
+        const RECONNECT_DELAY = 3000; // 3 seconds
+
+        /**
+         * Get local date string in YYYY-MM-DD format
+         * @param {Date} date - Date to format (defaults to now)
+         * @returns {string} Local date string like '2026-03-26'
+         */
+        function toLocalDateString(date = new Date()) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        // State
+        let appointments = [];
+        let currentScreen = 'A';
+        let currentScreenBPage = 0;
+        let totalScreenBPages = 1;
+        let previousNextPatient = null;
+        let ws = null;
+        let reconnectTimer = null;
+        let isConnecting = false;
+
+        // Patients per Screen B page (each page shows 2 columns x this many rows)
+        const PATIENTS_PER_SCREEN_B_PAGE = 10;
+
+        // WebSocket Connection
+        function connectWebSocket() {
+            if (isConnecting) return;
+            isConnecting = true;
+            updateConnectionStatus('connecting', 'Connecting...');
+
+            try {
+                ws = new WebSocket(WS_URL);
+
+                ws.onopen = () => {
+                    console.log('[TV] WebSocket connected');
+                    isConnecting = false;
+                    updateConnectionStatus('connected', 'Connected');
+                    if (reconnectTimer) {
+                        clearTimeout(reconnectTimer);
+                        reconnectTimer = null;
+                    }
+                    // Load initial data after connection
+                    loadAppointments();
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        console.log('[TV] WebSocket message:', message.type, message.data || '');
+                        handleWebSocketMessage(message);
+                    } catch (error) {
+                        console.error('[TV] Error parsing WebSocket message:', error);
+                    }
+                };
+
+                ws.onclose = (event) => {
+                    console.log('WebSocket closed:', event.code, event.reason);
+                    isConnecting = false;
+                    updateConnectionStatus('disconnected', 'Disconnected');
+                    scheduleReconnect();
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    isConnecting = false;
+                    updateConnectionStatus('disconnected', 'Connection error');
+                };
+
+            } catch (error) {
+                console.error('Failed to create WebSocket:', error);
+                isConnecting = false;
+                updateConnectionStatus('disconnected', 'Connection failed');
+                scheduleReconnect();
+            }
+        }
+
+        function updateConnectionStatus(status, text) {
+            const dot = document.getElementById('connectionStatusDot');
+            const textEl = document.getElementById('connectionStatusText');
+            
+            dot.className = 'status-dot ' + status;
+            textEl.textContent = text;
+        }
+
+        function scheduleReconnect() {
+            if (reconnectTimer) return;
+            
+            console.log(`Attempting to reconnect in ${RECONNECT_DELAY / 1000} seconds...`);
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                connectWebSocket();
+            }, RECONNECT_DELAY);
+        }
+
+        // Handle WebSocket messages
+        function handleWebSocketMessage(message) {
+            console.log('[TV] Message:', message.type);
+            switch (message.type) {
+                case 'queue_update':
+                case 'appointment_status_changed':
+                case 'patient_arrived':
+                case 'consultation_started':
+                case 'consultation_finished':
+                case 'appointment_deleted':
+                case 'appointment_created':
+                case 'appointment_updated':
+                    loadAppointments();
+                    break;
+
+                case 'connection_ack':
+                case 'heartbeat_ack':
+                    break;
+
+                case 'sync_complete':
+                    console.log('[TV] Sync complete, reloading all data...');
+                    loadAllData();
+                    break;
+
+                default:
+                    console.log('[TV] Unknown message type:', message.type);
+            }
+        }
+        
+        // Load all data from IndexedDB
+        async function loadAllData() {
+            try {
+                await Promise.all([
+                    loadAppointments(),
+                    loadPatients(),
+                    loadDoctors()
+                ]);
+                console.log('[TV View] All data loaded');
+            } catch (error) {
+                console.error('[TV View] Error loading all data:', error);
+            }
+        }
+        
+        // Load patients (for reference)
+        async function loadPatients() {
+            try {
+                patients = await TWOKDB.getAll(TWOKDB.STORES.PATIENTS);
+            } catch (error) {
+                console.error('Error loading patients:', error);
+            }
+        }
+        
+        // Load doctors (for reference)
+        async function loadDoctors() {
+            try {
+                doctors = await TWOKDB.getAll(TWOKDB.STORES.DOCTORS);
+            } catch (error) {
+                console.error('Error loading doctors:', error);
+            }
+        }
+
+        // Send heartbeat to keep connection alive
+        function sendHeartbeat() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'heartbeat', timestamp: new Date().toISOString() }));
+            }
+        }
+
+        // Load appointments from IndexedDB
+        async function loadAppointments() {
+            try {
+                appointments = await TWOKDB.getAll(TWOKDB.STORES.APPOINTMENTS);
+                console.log('[TV] Loaded', appointments.length, 'appointments from IndexedDB');
+                updateDisplay();
+            } catch (error) {
+                console.error('[TV] Error loading appointments:', error);
+            }
+        }
+
+        // Get today's appointments for target doctor
+        function getTodayAppointments() {
+            const today = toLocalDateString(new Date());
+
+            const filtered = appointments.filter(appt => {
+                const apptDate = appt.appointmentTime ? appt.appointmentTime.split('T')[0] : '';
+                // Use trimmed comparison for doctor name to handle whitespace issues
+                const doctorNameMatch = appt.doctorName && appt.doctorName.trim() === TARGET_DOCTOR;
+                const matches = doctorNameMatch &&
+                       apptDate === today &&
+                       appt.status !== 'Cancelled' &&
+                       appt.status !== 'Postpone';
+                return matches;
+            });
+
+            return filtered;
+        }
+
+        // Update all displays
+        function updateDisplay() {
+            const todayAppointments = getTodayAppointments();
+            console.log('[TV] Today appointments for', TARGET_DOCTOR, ':', todayAppointments.length, 'patients');
+            const arrivedStatuses = ['Arrived', 'Investigation'];
+            const hasArrivedPatients = todayAppointments.some(a => arrivedStatuses.includes(a.status));
+            console.log('[TV] Has arrived patients:', hasArrivedPatients);
+
+            hideEmptyState();
+
+            // Update Screen A
+            updateNowServing(todayAppointments);
+            updateNextPatient(todayAppointments);
+            updateQueueProgress(todayAppointments);
+
+            // Update Screen B only if there are arrived patients
+            if (hasArrivedPatients) {
+                updateWaitingTable(todayAppointments);
+            } else {
+                // Hide Screen B if no arrived patients
+                const screenBContainer = document.getElementById('screenB');
+                screenBContainer.classList.remove('screen-visible');
+            }
+        }
+
+        // Update Now Serving
+        function updateNowServing(appointments) {
+            const inConsult = appointments.find(a => a.status === 'In Consult');
+
+            const content = document.getElementById('nowServingContent');
+
+            if (inConsult) {
+                content.innerHTML = `
+                    <div class="card-number" id="nowServingNumber">${inConsult.bookingNumber}</div>
+                    <div class="card-name" id="nowServingName">${inConsult.patientName}</div>
+                    <div class="card-age" id="nowServingAge">${inConsult.age || '-'} years</div>
+                `;
+            } else if (appointments.length === 0) {
+                // No appointments today - show default message
+                content.innerHTML = `
+                    <div class="card-number" style="font-size: 60px; color: #2ecc71;">-</div>
+                    <div class="card-name" style="font-size: 24px; color: #666;">No patients today</div>
+                    <div class="card-age">Dr. Soe Chan Myae</div>
+                `;
+            } else {
+                content.innerHTML = '<div class="card-empty">No patient currently consulting</div>';
+            }
+        }
+
+        // Update Next Patient
+        function updateNextPatient(appointments) {
+            const arrivedStatuses = ['Arrived', 'Investigation'];
+            const arrived = appointments
+                .filter(a => arrivedStatuses.includes(a.status))
+                .sort((a, b) => {
+                    // Sort by booking number in ascending order (0, 1, 2, 3, ...)
+                    // null/undefined booking numbers go to the end
+                    if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
+                    if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
+
+                    // Both non-emergency: penalty first, then booking number
+                    if (a.penaltyTurns && !b.penaltyTurns) return 1;
+                    if (!a.penaltyTurns && b.penaltyTurns) return -1;
+
+                    // Sort by booking number ascending (0 comes before 1, 2, 3, etc.)
+                    return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
+                });
+
+            const booked = appointments
+                .filter(a => a.status === 'Booked')
+                .sort((a, b) => {
+                    // Sort by booking number in ascending order (0, 1, 2, 3, ...)
+                    // null/undefined booking numbers go to the end
+                    if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
+                    if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
+
+                    return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
+                });
+
+            const next = arrived.length > 0 ? arrived[0] : (booked.length > 0 ? booked[0] : null);
+
+            const content = document.getElementById('nextPatientContent');
+            const numberEl = document.getElementById('nextPatientNumber');
+            
+            if (next) {
+                // Check if next patient changed for animation
+                const patientChanged = previousNextPatient !== next.bookingNumber;
+                previousNextPatient = next.bookingNumber;
+
+                content.innerHTML = `
+                    <div class="card-number ${patientChanged ? 'slide-in' : ''}" id="nextPatientNumber">${next.bookingNumber}</div>
+                    <div class="card-name" id="nextPatientName">${next.patientName}</div>
+                `;
+            } else if (appointments.length === 0) {
+                // No appointments today - show default message
+                content.innerHTML = `
+                    <div class="card-number" style="font-size: 60px; color: #f39c12;">-</div>
+                    <div class="card-name" style="font-size: 24px; color: #666;">No waiting patients</div>
+                `;
+            } else {
+                content.innerHTML = '<div class="card-empty">No next patient</div>';
+            }
+        }
+
+        // Update Queue Progress
+        function updateQueueProgress(appointments) {
+            // Done patients
+            const done = appointments.filter(a => a.status === 'Done').length;
+            // Total = patients who have arrived or been processed
+            const activeStatuses = ['Arrived', 'In Consult', 'Investigation', 'Done'];
+            const total = appointments.filter(a => activeStatuses.includes(a.status)).length;
+            const percentage = total > 0 ? (done / total) * 100 : 0;
+
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+
+            progressBar.style.width = percentage + '%';
+
+            if (total === 0) {
+                progressText.innerHTML = `<strong>0</strong> / 0 patients completed`;
+            } else {
+                progressText.innerHTML = `<strong>${done}</strong> / ${total} patients completed`;
+            }
+        }
+
+        // Update Waiting Table (Screen B) - Creates multiple pages dynamically
+        function updateWaitingTable(appointments) {
+            const arrivedStatuses = ['Arrived', 'Investigation'];
+
+            // Get all arrived patients sorted by booking number in ascending order
+            const arrived = appointments
+                .filter(a => arrivedStatuses.includes(a.status))
+                .sort((a, b) => {
+                    // Sort by booking number in ascending order (0, 1, 2, 3, ...)
+                    // null/undefined booking numbers go to the end
+                    if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
+                    if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
+
+                    // Both non-emergency: penalty first, then booking number
+                    if (a.penaltyTurns && !b.penaltyTurns) return 1;
+                    if (!a.penaltyTurns && b.penaltyTurns) return -1;
+
+                    // Sort by booking number ascending (0 comes before 1, 2, 3, etc.)
+                    return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
+                });
+
+            const screenBContainer = document.getElementById('screenB');
+
+            // Clear existing pages (but don't change visibility - switchScreen() controls that)
+            screenBContainer.innerHTML = '';
+
+            // Calculate number of pages needed (at least 1 even when empty)
+            totalScreenBPages = Math.max(1, Math.ceil(arrived.length / PATIENTS_PER_SCREEN_B_PAGE));
+            currentScreenBPage = 0; // Reset to first page
+
+            if (arrived.length === 0) {
+                // Show a single page with "No patients waiting" message
+                const pageHtml = `
+                    <div class="screen-b-page screen-b-visible" id="screenBPage0">
+                        <div class="screen-b-layout">
+                            <div class="waiting-column">
+                                <div class="column-header">
+                                    <span class="column-dot arrived"></span>
+                                    <h2 class="column-title">No patients waiting</h2>
+                                </div>
+                                <div class="empty-state">
+                                    <p class="empty-state-text">No patients waiting</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                screenBContainer.innerHTML = pageHtml;
+                return;
+            }
+
+            // Create pages
+            for (let pageIndex = 0; pageIndex < totalScreenBPages; pageIndex++) {
+                const startIndex = pageIndex * PATIENTS_PER_SCREEN_B_PAGE;
+                const endIndex = Math.min(startIndex + PATIENTS_PER_SCREEN_B_PAGE, arrived.length);
+                const pagePatients = arrived.slice(startIndex, endIndex);
+                
+                // Split patients between two columns
+                const midpoint = Math.ceil(pagePatients.length / 2);
+                const leftPatients = pagePatients.slice(0, midpoint);
+                const rightPatients = pagePatients.slice(midpoint);
+                
+                const isFirstPage = pageIndex === 0;
+                const pageId = `screenBPage${pageIndex}`;
+                
+                const pageHtml = `
+                    <div class="screen-b-page ${isFirstPage ? 'screen-b-visible' : ''}" id="${pageId}">
+                        <div class="screen-b-layout">
+                            <!-- Left Column -->
+                            <div class="waiting-column">
+                                <div class="column-header">
+                                    <span class="column-dot arrived"></span>
+                                    <h2 class="column-title">Arrived / Waiting ${totalScreenBPages > 1 ? `(${pageIndex + 1}/${totalScreenBPages})` : ''}</h2>
+                                </div>
+                                <table class="waiting-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Booking No</th>
+                                            <th>Name</th>
+                                            <th>Age</th>
+                                            <th>Penalty</th>
+                                            <th>Arrival Time</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${leftPatients.length === 0 ?
+                                            '<tr><td colspan="5" style="text-align: center; color: #999; padding: 40px;">No patients waiting</td></tr>' :
+                                            leftPatients.map(patient => `
+                                                <tr>
+                                                    <td class="col-booking">${patient.bookingNumber}</td>
+                                                    <td class="col-name">${patient.patientName}</td>
+                                                    <td class="col-age">${patient.age}</td>
+                                                    <td class="col-penalty">${patient.penaltyTurns ? `<span class="penalty-badge">+${patient.penaltyTurns}</span>` : '-'}</td>
+                                                    <td class="col-time">${formatTime(patient.arrivalTime)}</td>
+                                                </tr>
+                                            `).join('')
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <!-- Right Column -->
+                            <div class="waiting-column">
+                                <div class="column-header">
+                                    <span class="column-dot arrived"></span>
+                                    <h2 class="column-title">Arrived / Waiting ${totalScreenBPages > 1 ? `(${pageIndex + 1}/${totalScreenBPages})` : ''}</h2>
+                                </div>
+                                <table class="waiting-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Booking No</th>
+                                            <th>Name</th>
+                                            <th>Age</th>
+                                            <th>Penalty</th>
+                                            <th>Arrival Time</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${rightPatients.length === 0 ?
+                                            '<tr><td colspan="5" style="text-align: center; color: #999; padding: 40px;">No patients waiting</td></tr>' :
+                                            rightPatients.map(patient => `
+                                                <tr>
+                                                    <td class="col-booking">${patient.bookingNumber}</td>
+                                                    <td class="col-name">${patient.patientName}</td>
+                                                    <td class="col-age">${patient.age}</td>
+                                                    <td class="col-penalty">${patient.penaltyTurns ? `<span class="penalty-badge">+${patient.penaltyTurns}</span>` : '-'}</td>
+                                                    <td class="col-time">${formatTime(patient.arrivalTime)}</td>
+                                                </tr>
+                                            `).join('')
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                screenBContainer.innerHTML += pageHtml;
+            }
+        }
+
+        // Switch between screens
+        function switchScreen() {
+            const screenA = document.getElementById('screenA');
+            const screenBContainer = document.getElementById('screenB');
+            
+            // Get today's appointments and check for arrived patients
+            const todayAppointments = getTodayAppointments();
+            const arrivedStatuses = ['Arrived', 'Investigation'];
+            const hasArrivedPatients = todayAppointments.some(a => arrivedStatuses.includes(a.status));
+            
+            // If no arrived patients, only show Screen A and don't switch
+            if (!hasArrivedPatients) {
+                screenA.classList.add('screen-visible');
+                screenBContainer.classList.remove('screen-visible');
+                // Hide all Screen B pages
+                for (let i = 0; i < totalScreenBPages; i++) {
+                    const page = document.getElementById(`screenBPage${i}`);
+                    if (page) {
+                        page.classList.remove('screen-b-visible');
+                    }
+                }
+                currentScreen = 'A';
+                currentScreenBPage = 0;
+                return;
+            }
+
+            if (currentScreen === 'A') {
+                // Switch from Screen A to Screen B (first page)
+                screenA.classList.remove('screen-visible');
+                screenBContainer.classList.add('screen-visible');
+                // Show first page of Screen B
+                const firstPage = document.getElementById('screenBPage0');
+                if (firstPage) {
+                    firstPage.classList.add('screen-b-visible');
+                }
+                currentScreen = 'B';
+                currentScreenBPage = 0;
+            } else {
+                // We're on Screen B, move to next page or back to A
+                currentScreenBPage++;
+
+                if (currentScreenBPage >= totalScreenBPages) {
+                    // Gone through all Screen B pages, switch back to A
+                    // Hide all Screen B pages
+                    for (let i = 0; i < totalScreenBPages; i++) {
+                        const page = document.getElementById(`screenBPage${i}`);
+                        if (page) {
+                            page.classList.remove('screen-b-visible');
+                        }
+                    }
+                    screenBContainer.classList.remove('screen-visible');
+                    screenA.classList.add('screen-visible');
+                    currentScreen = 'A';
+                    currentScreenBPage = 0;
+                } else {
+                    // Move to next Screen B page
+                    const prevPage = document.getElementById(`screenBPage${currentScreenBPage - 1}`);
+                    const nextPage = document.getElementById(`screenBPage${currentScreenBPage}`);
+                    if (prevPage) prevPage.classList.remove('screen-b-visible');
+                    if (nextPage) nextPage.classList.add('screen-b-visible');
+                }
+            }
+        }
+
+        // Format time
+        function formatTime(isoString) {
+            if (!isoString) return '--:--';
+            const date = new Date(isoString);
+            return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        // Update clock
+        function updateClock() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            const dateStr = now.toLocaleDateString('en-US', { 
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+            
+            document.getElementById('currentTime').textContent = timeStr;
+            document.getElementById('currentDate').textContent = dateStr;
+        }
+
+        // Show/hide empty state
+        function showEmptyState() {
+            const emptyState = document.getElementById('emptyState');
+            const screenA = document.getElementById('screenA');
+            const screenB = document.getElementById('screenB');
+
+            emptyState.style.display = 'block';
+            emptyState.style.zIndex = '10';
+            screenA.style.opacity = '0';
+            screenA.style.visibility = 'hidden';
+            screenB.classList.remove('screen-visible');
+            // Hide all Screen B pages
+            for (let i = 0; i < totalScreenBPages; i++) {
+                const page = document.getElementById(`screenBPage${i}`);
+                if (page) {
+                    page.style.opacity = '0';
+                    page.style.visibility = 'hidden';
+                }
+            }
+        }
+
+        function hideEmptyState() {
+            const emptyState = document.getElementById('emptyState');
+            const screenA = document.getElementById('screenA');
+            const screenBContainer = document.getElementById('screenB');
+
+            emptyState.style.display = 'none';
+
+            // Clear inline styles so CSS classes can work
+            screenA.style.opacity = '';
+            screenA.style.visibility = '';
+
+            // Clear inline styles for all Screen B pages
+            for (let i = 0; i < totalScreenBPages; i++) {
+                const page = document.getElementById(`screenBPage${i}`);
+                if (page) {
+                    page.style.opacity = '';
+                    page.style.visibility = '';
+                }
+            }
+
+            // Restore the active screen
+            if (currentScreen === 'A') {
+                screenA.classList.add('screen-visible');
+                screenBContainer.classList.remove('screen-visible');
+                // Hide all Screen B pages
+                for (let i = 0; i < totalScreenBPages; i++) {
+                    const page = document.getElementById(`screenBPage${i}`);
+                    if (page) {
+                        page.classList.remove('screen-b-visible');
+                    }
+                }
+            } else {
+                // Show current Screen B page
+                screenBContainer.classList.add('screen-visible');
+                for (let i = 0; i < totalScreenBPages; i++) {
+                    const page = document.getElementById(`screenBPage${i}`);
+                    if (page) {
+                        page.classList.toggle('screen-b-visible', i === currentScreenBPage);
+                    }
+                }
+                screenA.classList.remove('screen-visible');
+            }
+        }
+
+        // Toggle fullscreen
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.error('Fullscreen error:', err);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        // Initialize
+        function init() {
+            // Connect to WebSocket server
+            connectWebSocket();
+            
+            updateClock();
+
+            // Switch screens every 10 seconds
+            setInterval(switchScreen, SCREEN_SWITCH_INTERVAL);
+
+            // Update clock every second
+            setInterval(updateClock, 1000);
+
+            // Send heartbeat every 30 seconds to keep connection alive
+            setInterval(sendHeartbeat, 30000);
+        }
+
+        // Start
+        init();
+
+        // Expose WebSocket send function for external use (from main app)
+        window.sendQueueEvent = function(type, data = {}) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type, ...data }));
+            } else {
+                console.warn('WebSocket not connected, cannot send event:', type);
+            }
+        };
+
+        // Expose connection status checker
+        window.isWebSocketConnected = function() {
+            return ws && ws.readyState === WebSocket.OPEN;
+        };
+    </script>
+</body>
+</html>
