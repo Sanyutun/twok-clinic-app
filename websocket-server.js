@@ -12,8 +12,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = process.env.WS_PORT || 3000;
-const HTTP_PORT = process.env.HTTP_PORT || 9000;
+const PORT = process.env.PORT || 3000; // Render provides PORT environment variable
 const BROADCAST_DELAY = 100; // ms delay before broadcasting to batch updates
 
 // MIME types for serving static files
@@ -173,59 +172,13 @@ wss.on('error', (error) => {
 });
 
 // Start the combined HTTP + WebSocket server
-httpServer.listen(HTTP_PORT, () => {
+httpServer.listen(PORT, () => {
     console.log(`TWOK Clinic Server started:`);
-    console.log(`  - Main App: http://localhost:${HTTP_PORT}/`);
-    console.log(`  - TV View:  http://localhost:${HTTP_PORT}/tv-view.html`);
-    console.log(`  - WebSocket: ws://localhost:${PORT}`);
+    console.log(`  - Main App: http://localhost:${PORT}/`);
+    console.log(`  - TV View:  http://localhost:${PORT}/tv-view.html`);
+    console.log(`  - WebSocket: ws://localhost:${PORT}/ws`);
     console.log(`Waiting for connections...`);
 });
 
-/**
- * HTTP endpoint for triggering broadcasts (optional)
- * Can be used to trigger updates from the main app via HTTP POST
- */
-const broadcastServer = http.createServer((req, res) => {
-    // Enable CORS
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-    if (req.method === 'OPTIONS') {
-        res.writeHead(200);
-        res.end();
-        return;
-    }
-
-    if (req.method === 'POST' && req.url === '/broadcast') {
-        let body = '';
-
-        req.on('data', chunk => {
-            body += chunk.toString();
-        });
-
-        req.on('end', () => {
-            try {
-                const data = JSON.parse(body);
-                queueBroadcast({
-                    type: data.type,
-                    data: data.data,
-                    timestamp: new Date().toISOString()
-                });
-
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: true, clients: clients.size }));
-            } catch (error) {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Invalid JSON' }));
-            }
-        });
-    } else {
-        res.writeHead(404);
-        res.end('Not Found');
-    }
-});
-
-broadcastServer.listen(HTTP_PORT + 1, () => {
-    console.log(`  - HTTP Broadcast: http://localhost:${HTTP_PORT + 1}/broadcast`);
-});
+// Note: The separate broadcast server has been removed for cloud deployment.
+// Use the WebSocket connection to send updates directly.
