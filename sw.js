@@ -3,7 +3,7 @@
  * Provides offline functionality, caching, and background sync
  */
 
-const CACHE_NAME = 'twok-clinic-cache-v1';
+const CACHE_NAME = 'twok-clinic-cache-v2';
 const API_CACHE_NAME = 'twok-clinic-api-cache-v1';
 
 // Static assets to cache

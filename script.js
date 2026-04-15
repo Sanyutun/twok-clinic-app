@@ -458,14 +458,10 @@ const elements = {
     // Expense Section
     expenseSection: document.getElementById('expenseSection'),
     addExpenseBtn: document.getElementById('addExpenseBtn'),
-    expenseMonthFilter: document.getElementById('expenseMonthFilter'),
+    expenseDateFrom: document.getElementById('expenseDateFrom'),
+    expenseDateTo: document.getElementById('expenseDateTo'),
     categorySummaryContainer: document.getElementById('categorySummaryContainer'),
-    expenseDateFilter: document.getElementById('expenseDateFilter'),
     expenseTotalCount: document.getElementById('expenseTotalCount'),
-    customDateRange: document.getElementById('customDateRange'),
-    customDateFrom: document.getElementById('customDateFrom'),
-    customDateTo: document.getElementById('customDateTo'),
-    applyDateRangeBtn: document.getElementById('applyDateRangeBtn'),
     expenseTableContainer: document.getElementById('expenseTableContainer'),
     expenseEmptyMessage: document.getElementById('expenseEmptyMessage'),
     categoryDetailsDialog: document.getElementById('categoryDetailsDialog'),
@@ -703,6 +699,7 @@ async function init() {
     generateDoctorId();
     setupEventListeners();
     updateQueueSummary();
+    renderInstructionDoctorFilter();
     renderInstructionTableWithSaved();
     loadExpenseCategories();
     renderExpenseMonthFilter();
@@ -1266,7 +1263,7 @@ function renderHospitalList() {
 
 function renderDoctorFilter() {
     elements.appointmentDoctorFilter.innerHTML = '<option value="">All Doctors</option>';
-    
+
     // Collect unique doctor names from appointments
     const appointmentDoctors = new Set();
     appointments.forEach(appt => {
@@ -1274,14 +1271,14 @@ function renderDoctorFilter() {
             appointmentDoctors.add(appt.doctorName);
         }
     });
-    
+
     // Also include doctors from the doctors list
     doctors.forEach(doctor => {
         if (doctor.name) {
             appointmentDoctors.add(doctor.name);
         }
     });
-    
+
     // Sort and add to filter
     const sortedDoctors = Array.from(appointmentDoctors).sort();
     sortedDoctors.forEach(doctorName => {
@@ -1289,6 +1286,40 @@ function renderDoctorFilter() {
         option.value = doctorName;
         option.textContent = doctorName;
         elements.appointmentDoctorFilter.appendChild(option);
+    });
+}
+
+function renderInstructionDoctorFilter() {
+    if (!elements.instructionDoctorFilter) {
+        return;
+    }
+
+    elements.instructionDoctorFilter.innerHTML = '<option value="">All Doctors</option>';
+
+    // Collect unique doctor names from appointments with Done/Postpone status
+    const instructionDoctors = new Set();
+    appointments.forEach(appt => {
+        if ((appt.status === 'Done' || appt.status === 'Postpone') && appt.doctorName) {
+            instructionDoctors.add(appt.doctorName);
+        }
+    });
+
+    // Also include doctors from the doctors list
+    doctors.forEach(doctor => {
+        if (doctor.name) {
+            instructionDoctors.add(doctor.name);
+        }
+    });
+
+    console.log('[Instruction Filter] Populating filter with doctors:', Array.from(instructionDoctors));
+
+    // Sort and add to filter
+    const sortedDoctors = Array.from(instructionDoctors).sort();
+    sortedDoctors.forEach(doctorName => {
+        const option = document.createElement('option');
+        option.value = doctorName;
+        option.textContent = doctorName;
+        elements.instructionDoctorFilter.appendChild(option);
     });
 }
 
@@ -3187,10 +3218,14 @@ function renderInstructionTableWithSaved() {
     const doctorFilter = elements.instructionDoctorFilter.value;
     const sortFilter = elements.instructionSortFilter.value;
 
+    console.log('[Instruction Filter] Doctor filter value:', JSON.stringify(doctorFilter));
+
     // Get ALL appointments with status "Done" or "Postpone"
     let allAppointments = appointments.filter(appt => {
         return appt.status === 'Done' || appt.status === 'Postpone';
     });
+
+    console.log('[Instruction Filter] Total Done/Postpone appointments:', allAppointments.length);
 
     // Filter by search
     if (searchTerm) {
@@ -3201,7 +3236,16 @@ function renderInstructionTableWithSaved() {
 
     // Filter by doctor
     if (doctorFilter) {
-        allAppointments = allAppointments.filter(appt => appt.doctorName === doctorFilter);
+        console.log('[Instruction Filter] Applying doctor filter:', JSON.stringify(doctorFilter));
+        const beforeFilter = allAppointments.length;
+        allAppointments = allAppointments.filter(appt => {
+            const match = appt.doctorName === doctorFilter;
+            if (!match) {
+                console.log('[Instruction Filter] No match:', JSON.stringify(appt.doctorName), '!==', JSON.stringify(doctorFilter));
+            }
+            return match;
+        });
+        console.log('[Instruction Filter] After filter:', allAppointments.length, '(was', beforeFilter, ')');
     }
 
     // Sort by appointment date
@@ -3950,6 +3994,8 @@ function saveAppointment(e) {
     closeAppointmentFormModal();
     renderAppointmentTable();
     updateQueueSummary();
+    renderInstructionDoctorFilter();
+    renderInstructionTableWithSaved();
 }
 
 /**
@@ -4161,6 +4207,8 @@ async function deleteAppointment(event, appointmentId) {
         
         renderAppointmentTable();
         updateQueueSummary();
+        renderInstructionDoctorFilter();
+        renderInstructionTableWithSaved();
         showNotification('Appointment deleted successfully!');
         
         // Broadcast deletion to TV displays via WebSocket
@@ -5400,23 +5448,6 @@ function setupEventListeners() {
         }
     });
 
-    // Month filter change
-    elements.expenseMonthFilter.addEventListener('change', renderCategorySummary);
-
-    // Date filter change
-    elements.expenseDateFilter.addEventListener('change', () => {
-        const filterType = elements.expenseDateFilter.value;
-        if (filterType === 'custom') {
-            elements.customDateRange.classList.remove('hidden');
-        } else {
-            elements.customDateRange.classList.add('hidden');
-            renderExpenses();
-        }
-    });
-
-    // Apply custom date range
-    elements.applyDateRangeBtn.addEventListener('click', renderExpenses);
-
     // Close category details dialog
     elements.closeCategoryDetails.addEventListener('click', closeCategoryDetailsDialog);
     elements.categoryDetailsDialog.addEventListener('click', (e) => {
@@ -6101,37 +6132,28 @@ function deleteInstruction() {
 // ==================== EXPENSE MODULE ====================
 
 /**
- * Render month filter dropdown
+ * Set default date range filter to today
  */
 function renderExpenseMonthFilter() {
-    if (!elements.expenseMonthFilter) {
-        console.error('expenseMonthFilter element not found');
+    if (!elements.expenseDateFrom || !elements.expenseDateTo) {
+        console.error('expenseDateFrom or expenseDateTo element not found');
         return;
     }
 
-    const now = new Date();
-    const months = [];
+    // Set default date range to today
+    const today = toLocalDateString(new Date());
+    elements.expenseDateFrom.value = today;
+    elements.expenseDateTo.value = today;
 
-    // Generate last 12 months
-    for (let i = 0; i < 12; i++) {
-        const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-        const monthLabel = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-        months.push({ key: monthKey, label: monthLabel });
-    }
-
-    elements.expenseMonthFilter.innerHTML = '<option value="">Select Month</option>';
-    months.forEach(m => {
-        const option = document.createElement('option');
-        option.value = m.key;
-        option.textContent = m.label;
-        elements.expenseMonthFilter.appendChild(option);
+    // Add event listeners to update when dates change
+    elements.expenseDateFrom.addEventListener('change', () => {
+        renderCategorySummary();
+        renderExpenses();
     });
-
-    // Select current month by default
-    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    elements.expenseMonthFilter.value = currentMonth;
-
+    elements.expenseDateTo.addEventListener('change', () => {
+        renderCategorySummary();
+        renderExpenses();
+    });
 }
 
 /**
@@ -6149,30 +6171,17 @@ function renderExpenses() {
     }
 
     console.log('[renderExpenses] Total expenses in array:', expenses.length);
-    
-    const filterType = elements.expenseDateFilter ? elements.expenseDateFilter.value : 'all';
-    const now = new Date();
-    let filteredExpenses = [...expenses];
 
-    // Apply date filter
-    if (filterType === 'today') {
-        const today = toLocalDateString(now);
-        filteredExpenses = expenses.filter(e => e.dateTime.startsWith(today));
-    } else if (filterType === 'week') {
-        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        filteredExpenses = expenses.filter(e => new Date(e.dateTime) >= weekAgo);
-    } else if (filterType === 'month') {
-        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        filteredExpenses = expenses.filter(e => new Date(e.dateTime) >= monthAgo);
-    } else if (filterType === 'custom') {
-        const from = elements.customDateFrom ? elements.customDateFrom.value : '';
-        const to = elements.customDateTo ? elements.customDateTo.value : '';
-        if (from && to) {
-            filteredExpenses = expenses.filter(e => {
-                const eDate = e.dateTime.split('T')[0];
-                return eDate >= from && eDate <= to;
-            });
-        }
+    // Apply date range filter
+    let filteredExpenses = [...expenses];
+    const from = elements.expenseDateFrom ? elements.expenseDateFrom.value : '';
+    const to = elements.expenseDateTo ? elements.expenseDateTo.value : '';
+    
+    if (from && to) {
+        filteredExpenses = expenses.filter(e => {
+            const eDate = e.dateTime.split('T')[0];
+            return eDate >= from && eDate <= to;
+        });
     }
 
     // Sort by date/time descending
@@ -6302,20 +6311,21 @@ function renderCategorySummary() {
         return;
     }
 
-    const monthKey = elements.expenseMonthFilter ? elements.expenseMonthFilter.value : '';
-    if (!monthKey) {
-        elements.categorySummaryContainer.innerHTML = '<p style="color: var(--text-secondary); text-align: center;">Select a month to view summary</p>';
+    const dateFrom = elements.expenseDateFrom ? elements.expenseDateFrom.value : '';
+    const dateTo = elements.expenseDateTo ? elements.expenseDateTo.value : '';
+    
+    if (!dateFrom || !dateTo) {
+        elements.categorySummaryContainer.innerHTML = '<p style="color: var(--text-secondary); text-align: center;">Select a date range to view summary</p>';
         return;
     }
 
-    const [year, month] = monthKey.split('-').map(Number);
-    const monthExpenses = expenses.filter(e => {
-        const eDate = new Date(e.dateTime);
-        return eDate.getFullYear() === year && (eDate.getMonth() + 1) === month;
+    const filteredExpenses = expenses.filter(e => {
+        const eDate = e.dateTime.split('T')[0];
+        return eDate >= dateFrom && eDate <= dateTo;
     });
 
-    if (monthExpenses.length === 0) {
-        elements.categorySummaryContainer.innerHTML = '<p style="color: var(--text-secondary); text-align: center;">No expenses for this month</p>';
+    if (filteredExpenses.length === 0) {
+        elements.categorySummaryContainer.innerHTML = '<p style="color: var(--text-secondary); text-align: center;">No expenses for this date range</p>';
         return;
     }
 
@@ -6323,7 +6333,7 @@ function renderCategorySummary() {
     const categoryTotals = {};
     let grandTotal = 0;
 
-    monthExpenses.forEach(exp => {
+    filteredExpenses.forEach(exp => {
         const amount = parseInt(exp.amount);
         categoryTotals[exp.category] = (categoryTotals[exp.category] || 0) + amount;
         grandTotal += amount;
@@ -6336,7 +6346,7 @@ function renderCategorySummary() {
         .forEach(([category, total]) => {
             const percent = ((total / grandTotal) * 100).toFixed(1);
             html += `
-                <div class="category-summary-item" onclick="showCategoryDetails('${category}', '${monthKey}')">
+                <div class="category-summary-item" onclick="showCategoryDetails('${category}', '${dateFrom}', '${dateTo}')">
                     <span class="category-summary-name">${escapeHtml(category)}</span>
                     <div class="category-summary-bar">
                         <div class="category-summary-fill" style="width: ${percent}%"></div>
@@ -6353,21 +6363,20 @@ function renderCategorySummary() {
 /**
  * Show category details dialog
  */
-function showCategoryDetails(category, monthKey) {
-    const [year, month] = monthKey.split('-').map(Number);
+function showCategoryDetails(category, dateFrom, dateTo) {
     const categoryExpenses = expenses.filter(e => {
-        const eDate = new Date(e.dateTime);
-        return e.category === category && eDate.getFullYear() === year && (eDate.getMonth() + 1) === month;
+        const eDate = e.dateTime.split('T')[0];
+        return e.category === category && eDate >= dateFrom && eDate <= dateTo;
     });
-    
+
     if (categoryExpenses.length === 0) {
         showNotification('No expenses found for this category', 'error');
         return;
     }
-    
+
     // Sort by date descending
     categoryExpenses.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-    
+
     // Group by date
     const grouped = {};
     categoryExpenses.forEach(exp => {
@@ -6377,8 +6386,10 @@ function showCategoryDetails(category, monthKey) {
         }
         grouped[date].push(exp);
     });
-    
-    elements.categoryDetailsTitle.textContent = `${category} - ${new Date(year, month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`;
+
+    const fromDate = new Date(dateFrom).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const toDate = new Date(dateTo).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    elements.categoryDetailsTitle.textContent = `${category} - ${fromDate} to ${toDate}`;
     
     let html = '';
     Object.keys(grouped).sort((a, b) => b.localeCompare(a)).forEach(date => {
