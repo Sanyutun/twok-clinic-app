@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: twok-clinic-app
+    env: node
+    buildCommand: npm install
+    startCommand: node websocket-server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
