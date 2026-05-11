@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = 'TWOK_Clinic_DB';
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 
 // Store names matching original localStorage keys
 const STORES = {
@@ -19,7 +19,10 @@ const STORES = {
     INSTRUCTIONS: 'instructions',
     EXPENSES: 'expenses',
     EXPENSE_CATEGORIES: 'expense_categories',
-    LAB_TRACKER: 'lab_tracker'
+    LAB_TRACKER: 'lab_records', // Point to new store name
+    LAB_RECORDS: 'lab_records',
+    SETTINGS: 'settings',
+    SYNC_META: 'syncMeta'
 };
 
 let dbInstance = null;
@@ -27,6 +30,7 @@ let dbOpenPromise = null;
 
 // Reference to storageAdapter (will be set when available)
 let storageAdapterInstance = null;
+let isProcessingAdapter = false;
 
 /**
  * Set storage adapter instance (called from app initialization)
@@ -67,6 +71,7 @@ function openDB() {
 
         request.onupgradeneeded = (event) => {
             const db = event.target.result;
+            const transaction = event.target.transaction;
 
             // Create object stores with auto-increment keys
             Object.values(STORES).forEach(storeName => {
@@ -74,6 +79,26 @@ function openDB() {
                     db.createObjectStore(storeName, { keyPath: 'id', autoIncrement: false });
                 }
             });
+
+            // Migrate lab_tracker to lab_records if it exists
+            if (db.objectStoreNames.contains('lab_tracker') && !db.objectStoreNames.contains('lab_records_migrated')) {
+                console.log('[TWOKDB] Migrating lab_tracker to lab_records...');
+                const oldStore = transaction.objectStore('lab_tracker');
+                const newStore = transaction.objectStore('lab_records');
+                
+                oldStore.openCursor().onsuccess = (e) => {
+                    const cursor = e.target.result;
+                    if (cursor) {
+                        newStore.put(cursor.value);
+                        cursor.continue();
+                    } else {
+                        console.log('[TWOKDB] Lab migration data copy complete');
+                        // We can't easily delete store while cursor is open or in same transaction without care
+                        // So we just mark as migrated and legacy code will use the new store
+                        db.createObjectStore('lab_records_migrated'); 
+                    }
+                };
+            }
         };
     });
 
@@ -153,46 +178,75 @@ async function getById(storeName, id) {
  * Add or update an item
  * @param {string} storeName - Name of the object store
  * @param {Object} item - Item to add/update
+ * @param {boolean} skipSync - If true, do not trigger cloud sync
  * @returns {Promise<string>} - The ID of the added/updated item
  */
-async function put(storeName, item) {
-    // Use storage adapter if available
-    if (storageAdapterInstance) {
+async function put(storeName, item, skipSync = false) {
+    // 1. Trigger cloud sync if not skipped
+    if (!skipSync && window.DataLayer && typeof window.DataLayer.saveWithSync === 'function') {
         try {
+            await window.DataLayer.saveWithSync(storeName, 'upsert', item, item.id || item.PatientID || item.DoctorID || item.AppointmentID || item.InstructionID || item.ExpenseID || item.LabID);
+            return item.id || item.PatientID || item.DoctorID || item.AppointmentID || item.InstructionID || item.ExpenseID || item.LabID;
+        } catch (error) {
+            console.warn('[TWOKDB] Cloud sync failed in put(), falling back to local only:', error);
+        }
+    }
+
+    // Use storage adapter if available
+    if (storageAdapterInstance && !isProcessingAdapter) {
+        isProcessingAdapter = true;
+        try {
+            const isUpdate = !!(item.id || item.PatientID || item.DoctorID || item.AppointmentID || item.InstructionID || item.ExpenseID || item.LabID);
+            
             switch (storeName) {
                 case STORES.PATIENTS:
-                    await storageAdapterInstance.addPatient(item);
-                    return item.id || item.PatientID;
+                    if (isUpdate) await storageAdapterInstance.updatePatient(item.PatientID || item.id, item, skipSync);
+                    else await storageAdapterInstance.addPatient(item, skipSync);
+                    if (!skipSync) return item.id || item.PatientID;
+                    break;
                 case STORES.DOCTORS:
-                    await storageAdapterInstance.addDoctor(item);
-                    return item.id || item.DoctorID;
+                    if (isUpdate) await storageAdapterInstance.updateDoctor(item.DoctorID || item.id, item, skipSync);
+                    else await storageAdapterInstance.addDoctor(item, skipSync);
+                    if (!skipSync) return item.id || item.DoctorID;
+                    break;
                 case STORES.APPOINTMENTS:
-                    await storageAdapterInstance.addAppointment(item);
-                    return item.id || item.AppointmentID;
+                    if (isUpdate) await storageAdapterInstance.updateAppointment(item.AppointmentID || item.id, item, skipSync);
+                    else await storageAdapterInstance.addAppointment(item, skipSync);
+                    if (!skipSync) return item.id || item.AppointmentID;
+                    break;
                 case STORES.INSTRUCTIONS:
-                    await storageAdapterInstance.addInstruction(item);
-                    return item.id || item.InstructionID;
+                    await storageAdapterInstance.addInstruction(item, skipSync);
+                    if (!skipSync) return item.id || item.InstructionID;
+                    break;
                 case STORES.EXPENSES:
-                    await storageAdapterInstance.addExpense(item);
-                    return item.id || item.ExpenseID;
+                    await storageAdapterInstance.addExpense(item, skipSync);
+                    if (!skipSync) return item.id || item.ExpenseID;
+                    break;
                 case STORES.LAB_TRACKER:
-                    await storageAdapterInstance.addLab(item);
-                    return item.id || item.LabID;
+                    if (isUpdate) await storageAdapterInstance.updateLab(item.LabID || item.labId || item.id, item, skipSync);
+                    else await storageAdapterInstance.addLab(item, skipSync);
+                    if (!skipSync) return item.id || item.LabID;
+                    break;
                 case STORES.ADDRESSES:
                     storageAdapterInstance.addAddress(item);
-                    return item;
+                    if (!skipSync) return item;
+                    break;
                 case STORES.SPECIALITIES:
                     storageAdapterInstance.addSpeciality(item);
-                    return item;
+                    if (!skipSync) return item;
+                    break;
                 case STORES.HOSPITALS:
                     storageAdapterInstance.addHospital(item);
-                    return item;
+                    if (!skipSync) return item;
+                    break;
                 default:
                     // Fall back to IndexedDB
                     break;
             }
         } catch (error) {
             console.warn('[TWOKDB] Storage adapter failed, falling back to IndexedDB:', error);
+        } finally {
+            isProcessingAdapter = false;
         }
     }
     
@@ -212,37 +266,57 @@ async function put(storeName, item) {
  * Delete an item by ID
  * @param {string} storeName - Name of the object store
  * @param {string} id - Item ID to delete
+ * @param {boolean} skipSync - If true, do not trigger cloud sync
  * @returns {Promise<void>}
  */
-async function remove(storeName, id) {
+async function remove(storeName, id, skipSync = false) {
+    // 1. Trigger cloud sync if not skipped
+    if (!skipSync && window.DataLayer && typeof window.DataLayer.saveWithSync === 'function') {
+        try {
+            await window.DataLayer.saveWithSync(storeName, 'delete', null, id);
+            return;
+        } catch (error) {
+            console.warn('[TWOKDB] Cloud sync failed in remove(), falling back to local only:', error);
+        }
+    }
+
     // Use storage adapter if available
-    if (storageAdapterInstance) {
+    if (storageAdapterInstance && !isProcessingAdapter) {
+        isProcessingAdapter = true;
         try {
             switch (storeName) {
                 case STORES.PATIENTS:
-                    await storageAdapterInstance.deletePatient(id);
-                    return;
+                    await storageAdapterInstance.deletePatient(id, skipSync);
+                    if (!skipSync) return;
+                    break;
                 case STORES.DOCTORS:
-                    await storageAdapterInstance.deleteDoctor(id);
-                    return;
+                    await storageAdapterInstance.deleteDoctor(id, skipSync);
+                    if (!skipSync) return;
+                    break;
                 case STORES.APPOINTMENTS:
-                    await storageAdapterInstance.deleteAppointment(id);
-                    return;
+                    await storageAdapterInstance.deleteAppointment(id, skipSync);
+                    if (!skipSync) return;
+                    break;
                 case STORES.ADDRESSES:
                     storageAdapterInstance.deleteAddress(id);
-                    return;
+                    if (!skipSync) return;
+                    break;
                 case STORES.SPECIALITIES:
                     storageAdapterInstance.deleteSpeciality(id);
-                    return;
+                    if (!skipSync) return;
+                    break;
                 case STORES.HOSPITALS:
                     storageAdapterInstance.deleteHospital(id);
-                    return;
+                    if (!skipSync) return;
+                    break;
                 default:
                     // Fall back to IndexedDB
                     break;
             }
         } catch (error) {
             console.warn('[TWOKDB] Storage adapter failed, falling back to IndexedDB:', error);
+        } finally {
+            isProcessingAdapter = false;
         }
     }
     
@@ -296,9 +370,20 @@ async function count(storeName) {
  * Bulk add/update multiple items
  * @param {string} storeName - Name of the object store
  * @param {Array<Object>} items - Items to add/update
+ * @param {boolean} skipSync - If true, do not trigger cloud sync
  * @returns {Promise<void>}
  */
-async function bulkPut(storeName, items) {
+async function bulkPut(storeName, items, skipSync = false) {
+    // 1. Trigger cloud sync if not skipped
+    if (!skipSync && window.DataLayer && typeof window.DataLayer.bulkPutWithSync === 'function') {
+        try {
+            await window.DataLayer.bulkPutWithSync(storeName, items);
+            return;
+        } catch (error) {
+            console.warn('[TWOKDB] Cloud sync failed in bulkPut(), falling back to local only:', error);
+        }
+    }
+
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readwrite');
@@ -317,9 +402,22 @@ async function bulkPut(storeName, items) {
  * Bulk delete multiple items by IDs
  * @param {string} storeName - Name of the object store
  * @param {Array<string>} ids - IDs to delete
+ * @param {boolean} skipSync - If true, do not trigger cloud sync
  * @returns {Promise<void>}
  */
-async function bulkRemove(storeName, ids) {
+async function bulkRemove(storeName, ids, skipSync = false) {
+    // 1. Trigger cloud sync if not skipped
+    if (!skipSync && window.DataLayer && typeof window.DataLayer.saveWithSync === 'function') {
+        try {
+            for (const id of ids) {
+                await window.DataLayer.saveWithSync(storeName, 'delete', null, id);
+            }
+            return;
+        } catch (error) {
+            console.warn('[TWOKDB] Cloud sync failed in bulkRemove(), falling back to local only:', error);
+        }
+    }
+
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readwrite');

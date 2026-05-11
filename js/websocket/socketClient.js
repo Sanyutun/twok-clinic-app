@@ -5,7 +5,7 @@
  * Automatically reconnects on connection loss.
  */
 
-import { CONFIG } from './config.js';
+import { CONFIG } from '../config.js';
 
 class WebSocketClient {
     constructor() {

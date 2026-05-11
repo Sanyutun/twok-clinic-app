@@ -44,7 +44,7 @@ export const CONFIG = {
     CACHE_NAME: 'twok-clinic-cache-v1',
     
     // WebSocket Configuration
-    WEBSOCKET_URL: 'ws://localhost:8080',
+    WEBSOCKET_URL: 'ws://localhost:3099',
     WEBSOCKET_RECONNECT_INTERVAL: 5000
 };
 

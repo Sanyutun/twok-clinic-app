@@ -871,13 +871,31 @@ class ExpenseFormComponent {
         }
 
         const appointmentId = document.getElementById('globalExpenseAppointmentId').value;
-        const patientId = document.getElementById('globalExpensePatientId').value;
         const patientName = document.getElementById('globalExpensePatientName').value;
         const doctorName = document.getElementById('globalExpenseDoctorName').value;
         const itemName = document.getElementById('globalExpenseItemName').value;
         const amountValue = document.getElementById('globalExpenseAmount').value;
         const note = document.getElementById('globalExpenseNote').value;
         const dateTime = document.getElementById('globalExpenseDateTime').value;
+
+        // Resolve IDs defensively to avoid FK violations
+        let resolvedPatientId = document.getElementById('globalExpensePatientIdHidden').value;
+        const patientsList = window.patients || [];
+        const existingPatient = patientsList.find(p => p.name === patientName || p.id === resolvedPatientId);
+        if (existingPatient) {
+            resolvedPatientId = existingPatient.id;
+        } else {
+            resolvedPatientId = null;
+        }
+
+        let resolvedDoctorId = document.getElementById('globalExpenseDoctorIdHidden').value;
+        const doctorsList = window.doctors || [];
+        const existingDoctor = doctorsList.find(d => d.name === doctorName || d.id === resolvedDoctorId);
+        if (existingDoctor) {
+            resolvedDoctorId = existingDoctor.id;
+        } else {
+            resolvedDoctorId = null;
+        }
 
         // Validate amount
         const amount = parseFloat(amountValue);
@@ -902,13 +920,14 @@ class ExpenseFormComponent {
             amount: amount,
             category: expenseType,
             remark: itemName || null,
-            patientId: patientId || null,
+            patientId: resolvedPatientId,
             patientName: patientName || null,
             note: note || null,
             dateTime: dateTimeISO,
             createdTime: this.editingExpenseId ? (this.originalExpenseData?.createdTime || new Date().toISOString()) : new Date().toISOString(),
             appointment_id: appointmentId || null,
             doctor_name: doctorName || null,
+            doctor_id: resolvedDoctorId,
             item_name: itemName,
             expense_type: expenseType,
             custom_type_name: customTypeName || null,
@@ -1064,7 +1083,7 @@ class ExpenseFormComponent {
             expenseId: expenseData.id || null, // Link to the expense that created this
             patientId: expenseData.patientId || '',
             patientName: expenseData.patientName || this.currentAppointment?.patient_name || this.currentAppointment?.patientName || '',
-            doctorId: document.getElementById('globalExpenseDoctorIdHidden')?.value || '',
+            doctorId: expenseData.doctor_id || '',
             doctorName: expenseData.doctor_name || this.currentAppointment?.doctor_name || this.currentAppointment?.doctorName || '',
             labName: labName, // Lab location name (e.g., "TWOK", "NN")
             testName: expenseData.itemName || expenseData.remark || 'Blood Test', // Test type (e.g., "Blood Test", "C&S Results")
@@ -1107,12 +1126,13 @@ class ExpenseFormComponent {
             } else {
                 // Fallback to direct IndexedDB
                 return new Promise((resolve, reject) => {
-                    const request = indexedDB.open('TWOK_Clinic_DB', 1);
+                    const request = indexedDB.open('TWOK_Clinic_DB', 3);
 
                     request.onsuccess = () => {
                         const db = request.result;
-                        const transaction = db.transaction(['expenses'], 'readwrite');
-                        const store = transaction.objectStore('expenses');
+                        const storeName = window.TWOKDB ? window.TWOKDB.STORES.EXPENSES : 'expenses';
+                        const transaction = db.transaction([storeName], 'readwrite');
+                        const store = transaction.objectStore(storeName);
                         const putRequest = store.put(data);
 
                         putRequest.onsuccess = () => resolve();
@@ -1146,12 +1166,13 @@ class ExpenseFormComponent {
         } else {
             // Fallback to direct IndexedDB
             return new Promise((resolve, reject) => {
-                const request = indexedDB.open('TWOK_Clinic_DB', 1);
+                const request = indexedDB.open('TWOK_Clinic_DB', 3);
 
                 request.onsuccess = () => {
                     const db = request.result;
-                    const transaction = db.transaction(['lab_tracker'], 'readwrite');
-                    const store = transaction.objectStore('lab_tracker');
+                    const storeName = window.TWOKDB ? window.TWOKDB.STORES.LAB_TRACKER : 'lab_records';
+                    const transaction = db.transaction([storeName], 'readwrite');
+                    const store = transaction.objectStore(storeName);
                     const putRequest = store.put(data);
 
                     putRequest.onsuccess = () => resolve();

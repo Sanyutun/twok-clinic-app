@@ -67,7 +67,7 @@ const DEFAULT_EXPENSE_CATEGORIES = [
 ];
 
 // ==================== WEBSOCKET CONFIGURATION ====================
-const WS_URL = 'ws://localhost:9000';
+const WS_URL = 'ws://localhost:3099';
 const WS_RECONNECT_DELAY = 3000; // 3 seconds
 let ws = null;
 let wsReconnectTimer = null;
@@ -693,6 +693,53 @@ async function init() {
     // Initialize WebSocket for TV display
     initWebSocket();
 
+    // Sync button
+    const syncBtn = document.getElementById('syncBtn');
+    if (syncBtn) {
+        syncBtn.addEventListener('click', async () => {
+            const manager = window.twokSyncManager || window.SyncManager;
+            console.log('[SyncButton] Clicked. Manager:', manager, 'Type:', typeof manager);
+            
+            if (manager && typeof manager.pullAll === 'function') {
+                try {
+                    syncBtn.disabled = true;
+                    const originalText = syncBtn.innerHTML;
+                    syncBtn.innerHTML = '<i class="pi pi-spin pi-spinner"></i> Syncing...';
+                    
+                    console.log('[SyncButton] Calling manager.pullAll()');
+                    await manager.flushQueue();
+                    await manager.pullAll();
+                    
+                    syncBtn.disabled = false;
+                    syncBtn.innerHTML = originalText;
+                    
+                    if (typeof window.showNotification === 'function') {
+                        window.showNotification('Sync complete!', 'success');
+                    }
+                    console.log('[SyncButton] Sync successful');
+                } catch (err) {
+                    console.error('[SyncButton] Sync error:', err);
+                    syncBtn.disabled = false;
+                    syncBtn.innerHTML = '<i class="pi pi-sync"></i> Sync';
+                    if (typeof window.showNotification === 'function') {
+                        window.showNotification('Sync failed: ' + err.message, 'error');
+                    }
+                }
+            } else {
+                console.error('[SyncButton] SyncManager not found or pullAll not a function');
+                console.log('[SyncButton] Debug Info:', {
+                    twokSyncManagerPresent: !!window.twokSyncManager,
+                    SyncManagerPresent: !!window.SyncManager,
+                    Type: typeof (window.twokSyncManager || window.SyncManager),
+                    HasPullAll: (window.twokSyncManager || window.SyncManager) ? typeof (window.twokSyncManager || window.SyncManager).pullAll : 'n/a',
+                    SupabasePresent: !!window.SupabaseClient,
+                    DataLayerPresent: !!window.DataLayer
+                });
+                alert('Sync service not available.');
+            }
+        });
+    }
+
     // Schedule daily 8AM status update check
     scheduleDailyStatusUpdate();
 }
@@ -743,7 +790,7 @@ async function loadFromStorage() {
 
     // Load specialities (stored as objects, extract values)
     const specialitiesData = await TWOKDB.getAll(TWOKDB.STORES.SPECIALITIES);
-    specialities = specialitiesData.map(item => typeof item === 'string' ? item : (item.name || item.id));
+    specialities = specialitiesData.map(item => typeof item === 'string' ? item : (item.value || item.name || item.id));
     if (specialities.length === 0) {
         specialities = ['General Practitioner', 'Cardiologist', 'Paediatrician', 'Orthopaedic', 'Dermatologist', 'Neurologist'];
         await saveSpecialitiesToStorage();
@@ -751,7 +798,7 @@ async function loadFromStorage() {
 
     // Load hospitals (stored as objects, extract values)
     const hospitalsData = await TWOKDB.getAll(TWOKDB.STORES.HOSPITALS);
-    hospitals = hospitalsData.map(item => typeof item === 'string' ? item : (item.name || item.id));
+    hospitals = hospitalsData.map(item => typeof item === 'string' ? item : (item.value || item.name || item.id));
     if (hospitals.length === 0) {
         hospitals = ['Yangon General Hospital', 'SSC Hospital', 'Asia Royal Hospital', 'Pun Hlaing Hospital', 'Bahosi Hospital'];
         await saveHospitalsToStorage();
@@ -976,13 +1023,13 @@ async function saveDoctorsToStorage() {
 
 async function saveSpecialitiesToStorage() {
     // Store as simple objects with id for IndexedDB
-    const specialityObjects = specialities.map((spec, idx) => ({ id: `spec_${idx}`, name: spec }));
+    const specialityObjects = specialities.map((spec, idx) => ({ id: `spec_${idx}`, value: spec }));
     await TWOKDB.bulkPut(TWOKDB.STORES.SPECIALITIES, specialityObjects);
 }
 
 async function saveHospitalsToStorage() {
     // Store as simple objects with id for IndexedDB
-    const hospitalObjects = hospitals.map((hosp, idx) => ({ id: `hosp_${idx}`, name: hosp }));
+    const hospitalObjects = hospitals.map((hosp, idx) => ({ id: `hosp_${idx}`, value: hosp }));
     await TWOKDB.bulkPut(TWOKDB.STORES.HOSPITALS, hospitalObjects);
 }
 
@@ -1582,17 +1629,76 @@ function editPatient(event, patientId) {
     loadPatientToForm(patientId);
 }
 
-function deletePatient(event, patientId) {
+async function deletePatient(event, patientId) {
     event.stopPropagation();
     const patient = patients.find(p => p.id === patientId);
     if (!patient) return;
-    if (!confirm(`Are you sure you want to delete ${patient.name} (${patient.id})?\n\nThis action cannot be undone.`)) return;
-    const idx = patients.findIndex(p => p.id === patientId);
-    if (idx > -1) {
-        patients.splice(idx, 1);
-        savePatientsToStorage();
+    if (!confirm(`Are you sure you want to delete ${patient.name} (${patient.id})?\n\nThis will also delete ALL associated appointments, instructions, and expenses. This action cannot be undone.`)) return;
+
+    try {
+        showNotification('Deleting patient and associated records...', 'info');
+
+        // 1. Find and delete all associated records first (local only to avoid massive sync queue, 
+        // the server-side cascade will handle the cloud part)
+        
+        // Find appointments for this patient
+        const patientAppointments = appointments.filter(a => a.patientId === patientId);
+        for (const app of patientAppointments) {
+            // Delete instructions for this appointment
+            const appInstructions = instructions.filter(ins => ins.appointmentId === app.id);
+            for (const ins of appInstructions) {
+                await TWOKDB.remove(TWOKDB.STORES.INSTRUCTIONS, ins.id, true); // skipSync=true
+            }
+
+            // Delete expenses for this appointment
+            const appExpenses = expenses.filter(exp => exp.appointmentId === app.id);
+            for (const exp of appExpenses) {
+                await TWOKDB.remove(TWOKDB.STORES.EXPENSES, exp.id, true); // skipSync=true
+            }
+
+            // Delete lab records for this appointment/patient
+            const appLabs = labRecords.filter(lab => lab.patientId === patientId || lab.appointmentId === app.id);
+            for (const lab of appLabs) {
+                await TWOKDB.remove(TWOKDB.STORES.LAB_RECORDS, lab.id, true); // skipSync=true
+            }
+
+            // Finally delete the appointment itself
+            await TWOKDB.remove(TWOKDB.STORES.APPOINTMENTS, app.id, true); // skipSync=true
+        }
+
+        // 2. Delete the patient itself (this one triggers the cloud sync)
+        await TWOKDB.remove(TWOKDB.STORES.PATIENTS, patientId);
+
+        // 3. Remove from local arrays (maintenance)
+        // Note: TWOKDB.remove with DataLayer integration already handles removing from window arrays 
+        // if using the newer DataLayer, but we do it here for extra safety with legacy arrays.
+        
+        // Remove from local patients array
+        const idx = patients.findIndex(p => p.id === patientId);
+        if (idx > -1) {
+            patients.splice(idx, 1);
+        }
+
+        // Clean up other arrays if they weren't cleaned up by DataLayer
+        const appointmentIds = patientAppointments.map(a => a.id);
+        if (window.appointments) {
+            window.appointments = window.appointments.filter(a => a.patientId !== patientId);
+        }
+        if (window.instructions) {
+            window.instructions = window.instructions.filter(ins => !appointmentIds.includes(ins.appointmentId) && ins.patientId !== patientId);
+        }
+        if (window.expenses) {
+            window.expenses = window.expenses.filter(exp => !appointmentIds.includes(exp.appointmentId) && exp.patientId !== patientId);
+        }
+        if (window.labRecords) {
+            window.labRecords = window.labRecords.filter(lab => !appointmentIds.includes(lab.appointmentId) && lab.patientId !== patientId);
+        }
+
         renderPatientTable();
-        showNotification('Patient deleted successfully!');
+        showNotification('Patient and all associated records deleted successfully!');
+    } catch (error) {
+        console.error('Error deleting patient:', error);
+        showNotification('Error deleting patient: ' + error.message, 'error');
     }
 }
 
@@ -1717,18 +1823,55 @@ function editDoctor(event, doctorId) {
     loadDoctorToForm(doctorId);
 }
 
-function deleteDoctor(event, doctorId) {
+async function deleteDoctor(event, doctorId) {
     event.stopPropagation();
     const doctor = doctors.find(d => d.id === doctorId);
     if (!doctor) return;
-    if (!confirm(`Are you sure you want to delete ${doctor.name} (${doctor.id})?\n\nThis action cannot be undone.`)) return;
-    const idx = doctors.findIndex(d => d.id === doctorId);
-    if (idx > -1) {
-        doctors.splice(idx, 1);
-        saveDoctorsToStorage();
+    if (!confirm(`Are you sure you want to delete ${doctor.name} (${doctor.id})?\n\nThis will also delete ALL associated appointments. This action cannot be undone.`)) return;
+    
+    try {
+        showNotification('Deleting doctor and associated records...', 'info');
+
+        // 1. Find and delete associated appointments locally
+        const doctorAppointments = appointments.filter(a => a.doctorId === doctorId || a.doctorName === doctor.name);
+        for (const app of doctorAppointments) {
+            // Delete instructions/expenses for these appointments
+            const appInstructions = instructions.filter(ins => ins.appointmentId === app.id);
+            for (const ins of appInstructions) {
+                await TWOKDB.remove(TWOKDB.STORES.INSTRUCTIONS, ins.id, true);
+            }
+            const appExpenses = expenses.filter(exp => exp.appointmentId === app.id);
+            for (const exp of appExpenses) {
+                await TWOKDB.remove(TWOKDB.STORES.EXPENSES, exp.id, true);
+            }
+            const appLabs = labRecords.filter(lab => lab.appointmentId === app.id);
+            for (const lab of appLabs) {
+                await TWOKDB.remove(TWOKDB.STORES.LAB_RECORDS, lab.id, true);
+            }
+            
+            await TWOKDB.remove(TWOKDB.STORES.APPOINTMENTS, app.id, true);
+        }
+
+        // 2. Delete from IndexedDB and Supabase
+        await TWOKDB.remove(TWOKDB.STORES.DOCTORS, doctorId);
+
+        // 3. Remove from local arrays
+        const idx = doctors.findIndex(d => d.id === doctorId);
+        if (idx > -1) {
+            doctors.splice(idx, 1);
+        }
+
+        // Clean up global arrays
+        if (window.appointments) {
+            window.appointments = window.appointments.filter(a => a.doctorId !== doctorId && a.doctorName !== doctor.name);
+        }
+
         renderDoctorTable();
         renderDoctorFilter();
-        showNotification('Doctor deleted successfully!');
+        showNotification('Doctor and all associated records deleted successfully!');
+    } catch (error) {
+        console.error('Error deleting doctor:', error);
+        showNotification('Error deleting doctor: ' + error.message, 'error');
     }
 }
 
@@ -1936,7 +2079,16 @@ function showDoctorTooltip() {
 // ==================== NOTIFICATION ====================
 function showNotification(message, type = 'success') {
     elements.notificationText.textContent = message;
-    elements.notification.style.backgroundColor = type === 'error' ? '#dc2626' : '#16a34a';
+    
+    // Set color based on type
+    if (type === 'error') {
+        elements.notification.style.backgroundColor = '#dc2626'; // Red
+    } else if (type === 'warning') {
+        elements.notification.style.backgroundColor = '#f59e0b'; // Amber
+    } else {
+        elements.notification.style.backgroundColor = '#16a34a'; // Green
+    }
+    
     elements.notification.classList.remove('hidden');
     setTimeout(() => elements.notification.classList.add('hidden'), 3000);
 }
@@ -2000,7 +2152,7 @@ function getUsedNumbersForDate(doctorName, date, excludeAppointmentId = null) {
     const dateStr = typeof date === 'string' ? date : toLocalDateString(date);
     return appointments
         .filter(a => a.doctorName === doctorName &&
-                     a.appointmentTime.startsWith(dateStr) &&
+                     a.appointmentTime && a.appointmentTime.startsWith(dateStr) &&
                      a.bookingType !== 'Emergency' &&
                      a.bookingNumber !== null &&
                      a.bookingNumber !== 0 &&
@@ -2589,7 +2741,7 @@ function handleInvestigationYes() {
     // Build candidate list for next patient (will exclude the just-investigated patient)
     const today = toLocalDateString(new Date());
     const todayAppointments = appointments.filter(a =>
-        a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
+        a.appointmentTime && a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
     );
     buildCandidateList(todayAppointments);
 
@@ -2661,7 +2813,7 @@ function handleInvestigationNo() {
     // Build candidate list for next patient
     const today = toLocalDateString(new Date());
     const todayAppointments = appointments.filter(a =>
-        a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
+        a.appointmentTime && a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
     );
     buildCandidateList(todayAppointments);
 
@@ -2815,7 +2967,7 @@ function searchAppointments(searchTerm) {
 
 function updateQueueSummary() {
     const today = toLocalDateString(new Date());
-    const todayAppointments = appointments.filter(a => a.appointmentTime.startsWith(today));
+    const todayAppointments = appointments.filter(a => a.appointmentTime && a.appointmentTime.startsWith(today));
 
     const waiting = todayAppointments.filter(a =>
         ['Noted', 'Booked', 'Arrived', 'Investigation'].includes(a.status)
@@ -2878,7 +3030,7 @@ function updateQueueSummary() {
 function handleNextPatient() {
     const today = toLocalDateString(new Date());
     const todayAppointments = appointments.filter(a =>
-        a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
+        a.appointmentTime && a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
     );
 
     // Step 1: Check if someone is currently "In Consult"
@@ -2900,7 +3052,7 @@ function handleNextPatient() {
 function showPatientSelectionDialog() {
     const today = toLocalDateString(new Date());
     const todayAppointments = appointments.filter(a =>
-        a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
+        a.appointmentTime && a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
     );
 
     // Show the investigation dialog with patient selection section
@@ -3050,7 +3202,7 @@ function callNextPatient(patient) {
 
     const today = toLocalDateString(new Date());
     const todayAppointments = appointments.filter(a =>
-        a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
+        a.appointmentTime && a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
     );
 
     // Check if someone is currently in consultation
@@ -3679,7 +3831,7 @@ function showDoctorAutocomplete(searchTerm) {
     }
 
     elements.doctorAutocomplete.innerHTML = matches.map((d, idx) => `
-        <div class="autocomplete-item" data-index="${idx}" data-name="${escapeHtml(d.name)}">
+        <div class="autocomplete-item" data-index="${idx}" data-name="${escapeHtml(d.name)}" data-id="${escapeHtml(d.id)}">
             <div class="autocomplete-item-primary">${escapeHtml(d.name)}</div>
             <div class="autocomplete-item-secondary">${escapeHtml(d.speciality || '-')} — ${escapeHtml(d.hospital || '-')}</div>
         </div>
@@ -3692,9 +3844,10 @@ function showDoctorAutocomplete(searchTerm) {
     elements.doctorAutocomplete.querySelectorAll('.autocomplete-item').forEach(item => {
         item.addEventListener('click', () => {
             const name = item.dataset.name;
+            const id = item.dataset.id;
             if (name) {
                 elements.appointmentDoctor.value = name;
-                elements.appointmentDoctorId.value = name;
+                elements.appointmentDoctorId.value = id || '';
                 elements.doctorAutocomplete.classList.add('hidden');
                 elements.appointmentDateTime.focus();
             }
@@ -3786,6 +3939,23 @@ function saveAppointment(e) {
     if (!dateTime) { showNotification('Date & Time is required', 'error'); elements.appointmentDateTime.focus(); return; }
     if (!bookingType) { showNotification('Booking type is required', 'error'); elements.appointmentBookingType.focus(); return; }
 
+    // Resolve patientId and doctorId defensively to avoid FK violations
+    let resolvedPatientId = elements.appointmentPatientId.value;
+    const existingPatient = patients.find(p => p.name === patientName || p.id === resolvedPatientId);
+    if (existingPatient) {
+        resolvedPatientId = existingPatient.id;
+    } else {
+        resolvedPatientId = null;
+    }
+
+    let resolvedDoctorId = elements.appointmentDoctorId.value;
+    const existingDoctor = doctors.find(d => d.name === doctorName || d.id === resolvedDoctorId);
+    if (existingDoctor) {
+        resolvedDoctorId = existingDoctor.id;
+    } else {
+        resolvedDoctorId = null;
+    }
+
     // Calculate booking numbers for both Regular and VIP
     const appointmentDate = dateTime.split('T')[0];
     
@@ -3803,11 +3973,11 @@ function saveAppointment(e) {
             vipSlotPendingData = {
                 patientName: patientName,
                 doctorName: doctorName,
-                doctorId: elements.appointmentDoctorId.value,
+                doctorId: resolvedDoctorId,
                 dateTime: dateTime,
                 status: status,
                 bookingType: bookingType,
-                patientId: elements.appointmentPatientId.value,
+                patientId: resolvedPatientId,
                 age: elements.displayPatientAge.value,
                 sex: elements.displayPatientSex.value,
                 phone: elements.displayPatientPhone.value,
@@ -3830,7 +4000,7 @@ function saveAppointment(e) {
         const idx = parseInt(elements.appointmentEditIndex.value, 10);
         const existing = appointments[idx];
         if (existing && existing.doctorName === doctorName &&
-            existing.appointmentTime.startsWith(appointmentDate) &&
+            existing.appointmentTime && existing.appointmentTime.startsWith(appointmentDate) &&
             existing.bookingType === bookingType) {
             bookingNumber = existing.bookingNumber;
         }
@@ -3839,12 +4009,12 @@ function saveAppointment(e) {
 
     const data = {
         id: appointmentIsEditing ? elements.appointmentId.value : generateAppointmentId(),
-        patientId: elements.appointmentPatientId.value,
+        patientId: resolvedPatientId,
         patientName: patientName,
         age: elements.displayPatientAge.value,
         sex: elements.displayPatientSex.value,
         phone: elements.displayPatientPhone.value,
-        doctorId: elements.appointmentDoctorId.value,
+        doctorId: resolvedDoctorId,
         doctorName: doctorName,
         appointmentTime: dateTime,
         bookingType: bookingType,
@@ -4088,29 +4258,57 @@ async function deleteAppointment(event, appointmentId) {
     const appt = appointments.find(a => a.id === appointmentId);
     if (!appt) return;
     if (!confirm(`Are you sure you want to delete this appointment for ${appt.patientName}?`)) return;
-    
+
     try {
-        // Delete from IndexedDB
+        showNotification('Deleting appointment and associated records...', 'info');
+
+        // 1. Delete associated instructions, expenses, and lab records locally (skipSync=true)
+        const appInstructions = instructions.filter(ins => ins.appointmentId === appointmentId);
+        for (const ins of appInstructions) {
+            await TWOKDB.remove(TWOKDB.STORES.INSTRUCTIONS, ins.id, true);
+        }
+
+        const appExpenses = expenses.filter(exp => exp.appointmentId === appointmentId);
+        for (const exp of appExpenses) {
+            await TWOKDB.remove(TWOKDB.STORES.EXPENSES, exp.id, true);
+        }
+
+        const appLabs = labRecords.filter(lab => lab.appointmentId === appointmentId);
+        for (const lab of appLabs) {
+            await TWOKDB.remove(TWOKDB.STORES.LAB_RECORDS, lab.id, true);
+        }
+
+        // 2. Delete the appointment itself (triggers sync)
         await TWOKDB.remove(TWOKDB.STORES.APPOINTMENTS, appointmentId);
-        
-        // Remove from local array
+
+        // 3. Remove from local arrays
         const idx = appointments.findIndex(a => a.id === appointmentId);
         if (idx > -1) {
             appointments.splice(idx, 1);
         }
-        
+
+        // Clean up global window arrays if they weren't cleaned by DataLayer
+        if (window.instructions) {
+            window.instructions = window.instructions.filter(ins => ins.appointmentId !== appointmentId);
+        }
+        if (window.expenses) {
+            window.expenses = window.expenses.filter(exp => exp.appointmentId !== appointmentId);
+        }
+        if (window.labRecords) {
+            window.labRecords = window.labRecords.filter(lab => lab.appointmentId !== appointmentId);
+        }
+
         renderAppointmentTable();
         updateQueueSummary();
-        showNotification('Appointment deleted successfully!');
-        
+        showNotification('Appointment and all associated records deleted successfully!');
+
         // Broadcast deletion to TV displays via WebSocket
         sendQueueEvent('appointment_deleted', { appointmentId, patientName: appt.patientName });
     } catch (error) {
         console.error('Error deleting appointment:', error);
-        showNotification('Error deleting appointment', 'error');
+        showNotification('Error deleting appointment: ' + error.message, 'error');
     }
 }
-
 function resetAppointmentForm() {
     elements.appointmentForm.reset();
     elements.appointmentEditIndex.value = '';
@@ -4381,17 +4579,34 @@ function saveCalendarAppointment(e) {
         // Get available VIP slots that are less than regular number
         const availableVipSlots = getAvailableVipSlotsLessThan(doctorName, appointmentDate, regularNumber);
 
+        // Resolve patientId and doctorId defensively
+        let resolvedPatientId = elements.calendarApptPatientId.value;
+        const existingPatient = patients.find(p => p.name === patientName || p.id === resolvedPatientId);
+        if (existingPatient) {
+            resolvedPatientId = existingPatient.id;
+        } else {
+            resolvedPatientId = null;
+        }
+
+        let resolvedDoctorId = elements.calendarApptDoctorId.value;
+        const existingDoctor = doctors.find(d => d.name === doctorName || d.id === resolvedDoctorId);
+        if (existingDoctor) {
+            resolvedDoctorId = existingDoctor.id;
+        } else {
+            resolvedDoctorId = null;
+        }
+
         // Show dialog if there are VIP slots available that are better than regular
         if (availableVipSlots.length > 0) {
             // Store pending data and show dialog
             vipSlotPendingData = {
                 patientName: patientName,
                 doctorName: doctorName,
-                doctorId: elements.calendarApptDoctorId.value,
+                doctorId: resolvedDoctorId,
                 dateTime: dateTime,
                 status: status,
                 bookingType: bookingType,
-                patientId: elements.calendarApptPatientId.value,
+                patientId: resolvedPatientId,
                 age: elements.calendarDisplayPatientAge.value,
                 sex: elements.calendarDisplayPatientSex.value,
                 phone: elements.calendarDisplayPatientPhone.value,
@@ -4407,14 +4622,31 @@ function saveCalendarAppointment(e) {
 
     const bookingNumber = calculateBookingNumber(doctorName, bookingType, appointmentDate);
 
+    // Resolve patientId and doctorId defensively
+    let resolvedPatientId = elements.calendarApptPatientId.value;
+    const existingPatient = patients.find(p => p.name === patientName || p.id === resolvedPatientId);
+    if (existingPatient) {
+        resolvedPatientId = existingPatient.id;
+    } else {
+        resolvedPatientId = null;
+    }
+
+    let resolvedDoctorId = elements.calendarApptDoctorId.value;
+    const existingDoctor = doctors.find(d => d.name === doctorName || d.id === resolvedDoctorId);
+    if (existingDoctor) {
+        resolvedDoctorId = existingDoctor.id;
+    } else {
+        resolvedDoctorId = null;
+    }
+
     const data = {
         id: generateAppointmentId(),
-        patientId: elements.calendarApptPatientId.value,
+        patientId: resolvedPatientId,
         patientName: patientName,
         age: elements.calendarDisplayPatientAge.value,
         sex: elements.calendarDisplayPatientSex.value,
         phone: elements.calendarDisplayPatientPhone.value,
-        doctorId: elements.calendarApptDoctorId.value,
+        doctorId: resolvedDoctorId,
         doctorName: doctorName,
         appointmentTime: dateTime,
         bookingType: bookingType,
@@ -4510,7 +4742,7 @@ function showCalendarDoctorAutocomplete(searchTerm) {
     }
 
     elements.calendarDoctorAutocomplete.innerHTML = matches.map((d, idx) => `
-        <div class="autocomplete-item" data-index="${idx}" data-name="${escapeHtml(d.name)}">
+        <div class="autocomplete-item" data-index="${idx}" data-name="${escapeHtml(d.name)}" data-id="${escapeHtml(d.id)}">
             <div class="autocomplete-item-primary">${escapeHtml(d.name)}</div>
             <div class="autocomplete-item-secondary">${escapeHtml(d.speciality || '-')} — ${escapeHtml(d.hospital || '-')}</div>
         </div>
@@ -4522,9 +4754,10 @@ function showCalendarDoctorAutocomplete(searchTerm) {
     elements.calendarDoctorAutocomplete.querySelectorAll('.autocomplete-item').forEach(item => {
         item.addEventListener('click', () => {
             const name = item.dataset.name;
+            const id = item.dataset.id;
             if (name) {
                 elements.calendarApptDoctor.value = name;
-                elements.calendarApptDoctorId.value = name;
+                elements.calendarApptDoctorId.value = id || '';
                 elements.calendarDoctorAutocomplete.classList.add('hidden');
                 elements.calendarApptDateTime.focus();
                 
@@ -4707,7 +4940,7 @@ function setupEventListeners() {
     elements.patientCancelBtn.addEventListener('click', closePatientFormModal);
     
     // Patient - Delete
-    elements.patientDeleteBtn.addEventListener('click', () => {
+    elements.patientDeleteBtn.addEventListener('click', async () => {
         const patientId = elements.patientId.value;
         if (!patientId) return;
         
@@ -4716,13 +4949,22 @@ function setupEventListeners() {
         
         if (!confirm(`Are you sure you want to delete ${patient.name} (${patient.id})?\n\nThis action cannot be undone.`)) return;
         
-        const idx = patients.findIndex(p => p.id === patientId);
-        if (idx > -1) {
-            patients.splice(idx, 1);
-            savePatientsToStorage();
+        try {
+            // Delete from IndexedDB and Supabase
+            await TWOKDB.remove(TWOKDB.STORES.PATIENTS, patientId);
+
+            // Remove from local array
+            const idx = patients.findIndex(p => p.id === patientId);
+            if (idx > -1) {
+                patients.splice(idx, 1);
+            }
+
             closePatientFormModal();
             renderPatientTable();
             showNotification('Patient deleted successfully!');
+        } catch (error) {
+            console.error('Error deleting patient:', error);
+            showNotification('Error deleting patient', 'error');
         }
     });
 
@@ -4775,7 +5017,7 @@ function setupEventListeners() {
     elements.doctorCancelBtn.addEventListener('click', closeDoctorFormModal);
     
     // Doctor - Delete
-    elements.doctorDeleteBtn.addEventListener('click', () => {
+    elements.doctorDeleteBtn.addEventListener('click', async () => {
         const doctorId = elements.doctorId.value;
         if (!doctorId) return;
         
@@ -4784,14 +5026,23 @@ function setupEventListeners() {
         
         if (!confirm(`Are you sure you want to delete ${doctor.name} (${doctor.id})?\n\nThis action cannot be undone.`)) return;
         
-        const idx = doctors.findIndex(d => d.id === doctorId);
-        if (idx > -1) {
-            doctors.splice(idx, 1);
-            saveDoctorsToStorage();
+        try {
+            // Delete from IndexedDB and Supabase
+            await TWOKDB.remove(TWOKDB.STORES.DOCTORS, doctorId);
+
+            // Remove from local array
+            const idx = doctors.findIndex(d => d.id === doctorId);
+            if (idx > -1) {
+                doctors.splice(idx, 1);
+            }
+
             closeDoctorFormModal();
             renderDoctorTable();
             renderDoctorFilter();
             showNotification('Doctor deleted successfully!');
+        } catch (error) {
+            console.error('Error deleting doctor:', error);
+            showNotification('Error deleting doctor', 'error');
         }
     });
 
@@ -5253,7 +5504,7 @@ function setupEventListeners() {
             e.preventDefault();
             const today = toLocalDateString(new Date());
             const todayAppointments = appointments.filter(a =>
-                a.appointmentTime.startsWith(today) && a.status === 'Booked'
+                a.appointmentTime && a.appointmentTime.startsWith(today) && a.status === 'Booked'
             );
 
             if (todayAppointments.length > 0) {
@@ -5775,7 +6026,7 @@ function loadAppointmentsForBookingEditor() {
     
     // Filter appointments for the selected date and doctor
     bookingEditorAppointments = appointments.filter(appt => 
-        appt.appointmentTime.startsWith(selectedDate) &&
+        appt.appointmentTime && appt.appointmentTime.startsWith(selectedDate) &&
         appt.doctorName === TARGET_DOCTOR_NAME
     );
     
@@ -5999,7 +6250,7 @@ function saveInstruction(e) {
 /**
  * Delete the current instruction being edited
  */
-function deleteInstruction() {
+async function deleteInstruction() {
     const editId = elements.instructAppointmentId.getAttribute('data-edit-id');
     if (!editId) {
         showNotification('No instruction selected for deletion', 'error');
@@ -6016,20 +6267,27 @@ function deleteInstruction() {
         return;
     }
 
-    // Remove from array
-    const index = instructions.findIndex(i => i.id === editId);
-    if (index > -1) {
-        instructions.splice(index, 1);
-        saveInstructionsToStorage();
-    }
+    try {
+        // Delete from IndexedDB and Supabase
+        await TWOKDB.remove(TWOKDB.STORES.INSTRUCTIONS, editId);
 
-    closeInstructionFormPanel();
-    renderInstructionTableWithSaved();
-    showNotification('Instruction deleted successfully!');
+        // Remove from local array
+        const index = instructions.findIndex(i => i.id === editId);
+        if (index > -1) {
+            instructions.splice(index, 1);
+        }
 
-    // Refresh calendar if visible
-    if (!elements.calendarSection.classList.contains('hidden')) {
-        refreshCalendar();
+        closeInstructionFormPanel();
+        renderInstructionTableWithSaved();
+        showNotification('Instruction deleted successfully!');
+
+        // Refresh calendar if visible
+        if (!elements.calendarSection.classList.contains('hidden')) {
+            refreshCalendar();
+        }
+    } catch (error) {
+        console.error('Error deleting instruction:', error);
+        showNotification('Error deleting instruction', 'error');
     }
 }
 
@@ -6092,7 +6350,7 @@ function renderExpenses() {
     // Apply date filter
     if (filterType === 'today') {
         const today = toLocalDateString(now);
-        filteredExpenses = expenses.filter(e => e.dateTime.startsWith(today));
+        filteredExpenses = expenses.filter(e => e.dateTime && e.dateTime.startsWith(today));
     } else if (filterType === 'week') {
         const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         filteredExpenses = expenses.filter(e => new Date(e.dateTime) >= weekAgo);
@@ -7140,7 +7398,7 @@ function showLabDoctorAutocomplete(searchTerm) {
     }
 
     elements.labDoctorAutocomplete.innerHTML = matches.map((d, idx) => `
-        <div class="autocomplete-item" data-index="${idx}" data-name="${escapeHtml(d.name)}">
+        <div class="autocomplete-item" data-index="${idx}" data-name="${escapeHtml(d.name)}" data-id="${escapeHtml(d.id)}">
             <div class="autocomplete-item-primary">${escapeHtml(d.name)}</div>
             <div class="autocomplete-item-secondary">${escapeHtml(d.speciality || '-')} — ${escapeHtml(d.hospital || '-')}</div>
         </div>
@@ -7152,9 +7410,10 @@ function showLabDoctorAutocomplete(searchTerm) {
     elements.labDoctorAutocomplete.querySelectorAll('.autocomplete-item').forEach(item => {
         item.addEventListener('click', () => {
             const name = item.dataset.name;
+            const id = item.dataset.id;
             if (name) {
                 elements.labDoctor.value = name;
-                elements.labDoctorId.value = name;
+                elements.labDoctorId.value = id || '';
                 elements.labDoctorAutocomplete.classList.add('hidden');
                 elements.labName.focus();
             }
@@ -7263,15 +7522,30 @@ function saveLabRecord(e) {
     saveLabName(labName);
 
     const labId = elements.labId.value || generateLabId();
-    const patientId = elements.labPatientId.value;
-    const doctorId = elements.labDoctorId.value;
+    
+    // Resolve patientId and doctorId defensively to avoid FK violations
+    let resolvedPatientId = elements.labPatientId.value;
+    const existingPatient = patients.find(p => p.name === patientName || p.id === resolvedPatientId);
+    if (existingPatient) {
+        resolvedPatientId = existingPatient.id;
+    } else {
+        resolvedPatientId = null;
+    }
+
+    let resolvedDoctorId = elements.labDoctorId.value;
+    const existingDoctor = doctors.find(d => d.name === doctorName || d.id === resolvedDoctorId);
+    if (existingDoctor) {
+        resolvedDoctorId = existingDoctor.id;
+    } else {
+        resolvedDoctorId = null;
+    }
 
     const labData = {
         id: labId, // Required for IndexedDB keyPath
         labId: labId,
-        patientId: patientId,
+        patientId: resolvedPatientId,
         patientName: patientName,
-        doctorId: doctorId,
+        doctorId: resolvedDoctorId,
         doctorName: doctorName,
         labName: labName,
         amount: parseInt(amount),

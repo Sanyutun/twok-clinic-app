@@ -35,7 +35,7 @@ class InstructionService {
      */
     loadFromIndexedDB() {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open('TWOK_Clinic_DB', 1);
+            const request = indexedDB.open('TWOK_Clinic_DB', 3);
             
             request.onsuccess = () => {
                 const db = request.result;
@@ -72,8 +72,9 @@ class InstructionService {
                 return false;
             }
             
-            // Must have either nextAppointmentDate, selectedTests, or otherInstruction
+            // Must have either nextAppointmentDate, returnDuration, selectedTests, or otherInstruction
             return inst.nextAppointmentDate || 
+                   (inst.returnDuration && inst.returnUnit) ||
                    (inst.selectedTests && inst.selectedTests.length > 0) || 
                    inst.otherInstruction === 'After Results' ||
                    inst.otherInstruction === 'Do Tests Before';

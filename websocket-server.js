@@ -12,8 +12,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = process.env.WS_PORT || 3000;
-const HTTP_PORT = process.env.HTTP_PORT || 9000;
+const PORT = process.env.WS_PORT || 3099;
+const HTTP_PORT = process.env.HTTP_PORT || 9010;
 const BROADCAST_DELAY = 100; // ms delay before broadcasting to batch updates
 
 // MIME types for serving static files
@@ -61,8 +61,8 @@ const httpServer = http.createServer((req, res) => {
     });
 });
 
-// Create WebSocket server attached to HTTP server
-const wss = new WebSocket.Server({ server: httpServer });
+// Create WebSocket server on its own port
+const wss = new WebSocket.Server({ port: PORT });
 
 // Connected clients
 const clients = new Set();

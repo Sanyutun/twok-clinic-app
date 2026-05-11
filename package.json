@@ -4,15 +4,18 @@
   "description": "TWOK Clinic - Offline-first clinic management with WebSocket real-time updates",
   "main": "websocket-server.js",
   "scripts": {
-    "start": "node websocket-server.js",
-    "dev": "nodemon websocket-server.js",
-    "serve": "npx http-server -p 8080 -c-1"
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js",
+    "serve": "npx http-server -p 8080 -c-1",
+    "lite": "node websocket-server.js"
   },
   "dependencies": {
     "ws": "^8.14.2",
     "http-server": "^14.1.1",
     "express": "^4.18.2",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

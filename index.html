@@ -25,12 +25,14 @@
                     <p class="subtitle" id="headerSubtitle">Patient Registration System</p>
                 </div>
                 <div style="display: flex; align-items: center; gap: 10px;">
+                    <button type="button" id="syncBtn" class="tv-view-btn" title="Sync Data" onclick="if(window.triggerSync) window.triggerSync()">
+                        <i class="pi pi-sync"></i> Sync
+                    </button>
                     <button type="button" id="headerInstallBtn" class="pwa-header-install-btn" title="Install TWOK Clinic" style="display:none;">📲 Install</button>
                     <a href="tv-view.html" target="_blank" class="tv-view-btn" title="Open TV Queue Display">
                         <i class="pi pi-tv"></i> TV Display
                     </a>
-                </div>
-            </div>
+                </div>            </div>
         </header>
 
         <!-- Patient Section -->
@@ -2072,6 +2074,13 @@
             }
         }
     </script>
+    
+    <!-- Sync System -->
+    <script src="js/config/sync-config.js"></script>
+    <script src="js/sync/SupabaseClient.js"></script>
+    <script src="js/sync/SyncManager.js"></script>
+    <script src="js/sync/DataLayer.js"></script>
+    <script src="js/sync/init-sync.js"></script>
     
     <!-- Legacy Script (will be refactored) -->
     <script src="indexeddb.js"></script>

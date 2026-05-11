@@ -101,7 +101,7 @@ The TV view automatically reconnects every 3 seconds if the connection is lost.
 In `tv-view.html`, you can modify these constants:
 
 ```javascript
-const WS_URL = 'ws://localhost:9000';  // WebSocket server URL
+const WS_URL = 'ws://localhost:3099';  // WebSocket server URL
 const RECONNECT_DELAY = 3000;  // Reconnect delay in milliseconds
 ```
 
@@ -199,6 +199,6 @@ window.sendQueueEvent('queue_update', { test: true });
 Or using a WebSocket client like [wscat](https://github.com/websockets/wscat):
 
 ```bash
-wscat -c ws://localhost:9000
+wscat -c ws://localhost:3099
 > {"type": "queue_update", "data": {"test": true}}
 ```

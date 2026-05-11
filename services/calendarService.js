@@ -92,6 +92,36 @@ class CalendarService {
     }
 
     /**
+     * Parse date string safely (handles YYYY-MM-DD and YYYY-MM-DD HH:MM formats)
+     * @param {string} dateStr 
+     * @returns {Date|null}
+     */
+    parseDateSafely(dateStr) {
+        if (!dateStr) return null;
+        
+        // Remove time if present (e.g., "2024-05-09 10:30 AM" -> "2024-05-09" OR "2024-05-09T08:00:00" -> "2024-05-09")
+        let onlyDate = dateStr;
+        if (dateStr.includes(' ')) {
+            onlyDate = dateStr.split(' ')[0];
+        } else if (dateStr.includes('T')) {
+            onlyDate = dateStr.split('T')[0];
+        }
+        
+        const parts = onlyDate.split('-');
+        if (parts.length === 3) {
+            // Create date using year, month (0-indexed), and day
+            // This avoids timezone shifting that happens with new Date(string)
+            const year = parseInt(parts[0]);
+            const month = parseInt(parts[1]) - 1;
+            const day = parseInt(parts[2]);
+            return new Date(year, month, day);
+        }
+        
+        const date = new Date(dateStr);
+        return isNaN(date.getTime()) ? null : date;
+    }
+
+    /**
      * Generate follow-up visit events
      * @param {Array} instructions
      * @param {Array} bloodTests
@@ -104,15 +134,17 @@ class CalendarService {
             let date = null;
             if (inst.nextAppointmentDate && inst.nextAppointmentDate.trim() !== '') {
                 date = inst.nextAppointmentDate;
-            } else if (inst.returnDuration && inst.returnUnit) {
-                const apptDate = new Date(inst.appointmentDate);
-                switch (inst.returnUnit) {
-                    case 'Days': apptDate.setDate(apptDate.getDate() + inst.returnDuration); break;
-                    case 'Weeks': apptDate.setDate(apptDate.getDate() + (inst.returnDuration * 7)); break;
-                    case 'Months': apptDate.setMonth(apptDate.getMonth() + inst.returnDuration); break;
-                    default: apptDate.setDate(apptDate.getDate() + inst.returnDuration);
+            } else if (inst.returnDuration && inst.returnUnit && (inst.appointmentDate || inst.createdTime)) {
+                const apptDate = this.parseDateSafely(inst.appointmentDate || inst.createdTime);
+                if (apptDate) {
+                    switch (inst.returnUnit) {
+                        case 'Days': apptDate.setDate(apptDate.getDate() + inst.returnDuration); break;
+                        case 'Weeks': apptDate.setDate(apptDate.getDate() + (inst.returnDuration * 7)); break;
+                        case 'Months': apptDate.setMonth(apptDate.getMonth() + inst.returnDuration); break;
+                        default: apptDate.setDate(apptDate.getDate() + inst.returnDuration);
+                    }
+                    date = `${apptDate.getFullYear()}-${String(apptDate.getMonth() + 1).padStart(2, '0')}-${String(apptDate.getDate()).padStart(2, '0')}`;
                 }
-                date = `${apptDate.getFullYear()}-${String(apptDate.getMonth() + 1).padStart(2, '0')}-${String(apptDate.getDate()).padStart(2, '0')}`;
             }
 
             // Skip if no explicit date/duration - TODO events will handle this

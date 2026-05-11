@@ -35,7 +35,7 @@ class LabService {
      */
     loadFromIndexedDB() {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open('TWOK_Clinic_DB', 1);
+            const request = indexedDB.open('TWOK_Clinic_DB', 3);
             
             request.onsuccess = () => {
                 const db = request.result;

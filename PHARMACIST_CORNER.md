@@ -310,7 +310,7 @@ Real-time updates via WebSocket:
 
 ```javascript
 // Connect to WebSocket
-const ws = new WebSocket('ws://localhost:9000');
+const ws = new WebSocket('ws://localhost:3099');
 
 // Listen for appointment status changes
 ws.onmessage = (event) => {

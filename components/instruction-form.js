@@ -319,20 +319,34 @@ class InstructionFormComponent {
      * Handle form submission
      */
     async handleSubmit() {
+        const appointment = this.currentAppointment || {};
+        const apptId = appointment.id || appointment.appointment_id;
+        
         const instructionData = {
-            instruction_id: 'inst_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-            appointment_id: document.getElementById('globalInstructAppointmentId').value,
-            patient_id: document.getElementById('globalInstructPatientId').value,
-            doctor_name: document.getElementById('globalInstructDoctorName').value,
-            instruction_type: document.getElementById('instructionType').value,
-            instruction_note: document.getElementById('instructionNote').value,
-            next_visit_date: document.getElementById('nextVisitDate').value,
-            timestamp: new Date().toISOString()
+            id: 'inst_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            appointmentId: apptId,
+            patientId: appointment.patient_id || appointment.patientId,
+            patientName: appointment.patient_name || appointment.patientName,
+            age: appointment.age || appointment.patientAge,
+            phone: appointment.phone || appointment.patientPhone,
+            doctorName: appointment.doctor_name || appointment.doctorName,
+            appointmentDate: appointment.appointment_time || appointment.appointmentTime,
+            bookingNumber: appointment.booking_number || appointment.bookingNumber,
+            otherInstruction: document.getElementById('instructionType').value,
+            generalInstruction: document.getElementById('instructionNote').value,
+            nextAppointmentDate: document.getElementById('nextVisitDate').value,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
         };
 
         try {
-            // Save to IndexedDB (primary storage)
-            await this.saveToIndexedDB(instructionData);
+            // Save using DataLayer to ensure it's queued for sync
+            if (window.DataLayer && typeof window.DataLayer.saveWithSync === 'function') {
+                await window.DataLayer.saveWithSync('instructions', 'upsert', instructionData, instructionData.id);
+            } else {
+                // Fallback to direct IndexedDB if DataLayer is not available
+                await this.saveToIndexedDB(instructionData);
+            }
 
             // Show success notification
             this.showNotification('Instruction saved successfully', 'success');
@@ -360,7 +374,7 @@ class InstructionFormComponent {
         } else {
             // Fallback to direct IndexedDB
             return new Promise((resolve, reject) => {
-                const request = indexedDB.open('TWOK_Clinic_DB', 1);
+                const request = indexedDB.open('TWOK_Clinic_DB', 3);
 
                 request.onsuccess = () => {
                     const db = request.result;

@@ -74,7 +74,7 @@ class PharmacistCornerApp {
      */
     loadFromIndexedDB(storeName) {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open('TWOK_Clinic_DB', 1);
+            const request = indexedDB.open('TWOK_Clinic_DB', 3);
             
             request.onsuccess = () => {
                 const db = request.result;
@@ -155,7 +155,7 @@ class PharmacistCornerApp {
      */
     setupWebSocket() {
         if ('WebSocket' in window) {
-            const wsUrl = 'ws://localhost:9000';
+            const wsUrl = 'ws://localhost:3099';
             
             try {
                 this.ws = new WebSocket(wsUrl);

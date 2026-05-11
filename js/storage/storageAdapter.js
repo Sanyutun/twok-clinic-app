@@ -5,7 +5,8 @@
  * and the new IndexedDB backend.
  */
 
-import { indexedDBStorage } from './storage/indexedDB.js';
+// Reference to indexedDBStorage (window.TWOKDB)
+const indexedDBStorage = window.TWOKDB;
 
 class StorageAdapter {
     constructor() {
@@ -27,7 +28,7 @@ class StorageAdapter {
      * Initialize storage adapter
      */
     async init() {
-        await indexedDBStorage.open();
+        await indexedDBStorage.openDB();
         await this.loadCache();
         console.log('[StorageAdapter] Initialized');
     }
@@ -37,25 +38,15 @@ class StorageAdapter {
      */
     async loadCache() {
         try {
-            this.cache.patients = await indexedDBStorage.getPatients() || [];
-            this.cache.doctors = await indexedDBStorage.getDoctors() || [];
-            this.cache.appointments = await indexedDBStorage.getAppointments() || [];
-            this.cache.instructions = await indexedDBStorage.getInstructions() || [];
-            this.cache.expenses = await indexedDBStorage.getExpenses() || [];
-            this.cache.labTracker = await indexedDBStorage.getLabTracking() || [];
+            this.cache.patients = await indexedDBStorage.getAll(indexedDBStorage.STORES.PATIENTS) || [];
+            this.cache.doctors = await indexedDBStorage.getAll(indexedDBStorage.STORES.DOCTORS) || [];
+            this.cache.appointments = await indexedDBStorage.getAll(indexedDBStorage.STORES.APPOINTMENTS) || [];
+            this.cache.instructions = await indexedDBStorage.getAll(indexedDBStorage.STORES.INSTRUCTIONS) || [];
+            this.cache.expenses = await indexedDBStorage.getAll(indexedDBStorage.STORES.EXPENSES) || [];
+            this.cache.labTracker = await indexedDBStorage.getAll(indexedDBStorage.STORES.LAB_TRACKER) || [];
 
-            // Load settings
-            const settings = await indexedDBStorage.getSettings() || [];
-            const vipNumbersSetting = settings.find(s => s.SettingKey === 'vipReservedNumbers');
-            if (vipNumbersSetting) {
-                try {
-                    this.cache.vipReservedNumbers = JSON.parse(vipNumbersSetting.SettingValue);
-                } catch (e) {
-                    this.cache.vipReservedNumbers = [1, 2, 5, 8, 12, 14, 18];
-                }
-            } else {
-                this.cache.vipReservedNumbers = [1, 2, 5, 8, 12, 14, 18];
-            }
+            // Settings are not in IndexedDB, assume default
+            this.cache.vipReservedNumbers = [1, 2, 5, 8, 12, 14, 18];
 
             // Load from localStorage for backward compatibility
             this.loadFromLocalStorage();
@@ -112,24 +103,30 @@ class StorageAdapter {
         return this.cache.patients;
     }
 
-    async addPatient(patient) {
+    async addPatient(patient, skipDB = false) {
         this.cache.patients.push(patient);
-        await indexedDBStorage.put('patients', patient);
+        if (!skipDB) {
+            await indexedDBStorage.put(indexedDBStorage.STORES.PATIENTS, patient);
+        }
         return patient;
     }
 
-    async updatePatient(patientId, patient) {
+    async updatePatient(patientId, patient, skipDB = false) {
         const index = this.cache.patients.findIndex(p => p.PatientID === patientId);
         if (index !== -1) {
             this.cache.patients[index] = { ...patient, PatientID: patientId };
         }
-        await indexedDBStorage.put('patients', { ...patient, PatientID: patientId });
+        if (!skipDB) {
+            await indexedDBStorage.put(indexedDBStorage.STORES.PATIENTS, { ...patient, PatientID: patientId });
+        }
         return { ...patient, PatientID: patientId };
     }
 
-    async deletePatient(patientId) {
+    async deletePatient(patientId, skipDB = false) {
         this.cache.patients = this.cache.patients.filter(p => p.PatientID !== patientId);
-        await indexedDBStorage.delete('patients', patientId);
+        if (!skipDB) {
+            await indexedDBStorage.remove(indexedDBStorage.STORES.PATIENTS, patientId);
+        }
         return true;
     }
 
@@ -139,24 +136,30 @@ class StorageAdapter {
         return this.cache.doctors;
     }
 
-    async addDoctor(doctor) {
+    async addDoctor(doctor, skipDB = false) {
         this.cache.doctors.push(doctor);
-        await indexedDBStorage.put('doctors', doctor);
+        if (!skipDB) {
+            await indexedDBStorage.put(indexedDBStorage.STORES.DOCTORS, doctor);
+        }
         return doctor;
     }
 
-    async updateDoctor(doctorId, doctor) {
+    async updateDoctor(doctorId, doctor, skipDB = false) {
         const index = this.cache.doctors.findIndex(d => d.DoctorID === doctorId);
         if (index !== -1) {
             this.cache.doctors[index] = { ...doctor, DoctorID: doctorId };
         }
-        await indexedDBStorage.put('doctors', { ...doctor, DoctorID: doctorId });
+        if (!skipDB) {
+            await indexedDBStorage.put(indexedDBStorage.STORES.DOCTORS, { ...doctor, DoctorID: doctorId });
+        }
         return { ...doctor, DoctorID: doctorId };
     }
 
-    async deleteDoctor(doctorId) {
+    async deleteDoctor(doctorId, skipDB = false) {
         this.cache.doctors = this.cache.doctors.filter(d => d.DoctorID !== doctorId);
-        await indexedDBStorage.delete('doctors', doctorId);
+        if (!skipDB) {
+            await indexedDBStorage.remove(indexedDBStorage.STORES.DOCTORS, doctorId);
+        }
         return true;
     }
 
@@ -166,24 +169,30 @@ class StorageAdapter {
         return this.cache.appointments;
     }
 
-    async addAppointment(appointment) {
+    async addAppointment(appointment, skipDB = false) {
         this.cache.appointments.push(appointment);
-        await indexedDBStorage.put('appointments', appointment);
+        if (!skipDB) {
+            await indexedDBStorage.put(indexedDBStorage.STORES.APPOINTMENTS, appointment);
+        }
         return appointment;
     }
 
-    async updateAppointment(appointmentId, appointment) {
+    async updateAppointment(appointmentId, appointment, skipDB = false) {
         const index = this.cache.appointments.findIndex(a => a.AppointmentID === appointmentId);
         if (index !== -1) {
             this.cache.appointments[index] = { ...appointment, AppointmentID: appointmentId };
         }
-        await indexedDBStorage.put('appointments', { ...appointment, AppointmentID: appointmentId });
+        if (!skipDB) {
+            await indexedDBStorage.put(indexedDBStorage.STORES.APPOINTMENTS, { ...appointment, AppointmentID: appointmentId });
+        }
         return { ...appointment, AppointmentID: appointmentId };
     }
 
-    async deleteAppointment(appointmentId) {
-        this.cache.appointments = this.cache.appointments.filter(a => a.AppointmentID !== appointmentId);
-        await indexedDBStorage.delete('appointments', appointmentId);
+    async deleteAppointment(appointmentId, skipDB = false) {
+        this.cache.appointments = this.cache.appointments.filter(a => a.AppointmentID === appointmentId);
+        if (!skipDB) {
+            await indexedDBStorage.remove(indexedDBStorage.STORES.APPOINTMENTS, appointmentId);
+        }
         return true;
     }
 
@@ -193,9 +202,11 @@ class StorageAdapter {
         return this.cache.instructions;
     }
 
-    async addInstruction(instruction) {
+    async addInstruction(instruction, skipDB = false) {
         this.cache.instructions.push(instruction);
-        await indexedDBStorage.put('instructions', instruction);
+        if (!skipDB) {
+            await indexedDBStorage.put(indexedDBStorage.STORES.INSTRUCTIONS, instruction);
+        }
         return instruction;
     }
 
@@ -205,9 +216,11 @@ class StorageAdapter {
         return this.cache.expenses;
     }
 
-    async addExpense(expense) {
+    async addExpense(expense, skipDB = false) {
         this.cache.expenses.push(expense);
-        await indexedDBStorage.put('expenses', expense);
+        if (!skipDB) {
+            await indexedDBStorage.put(indexedDBStorage.STORES.EXPENSES, expense);
+        }
         return expense;
     }
 
@@ -217,18 +230,22 @@ class StorageAdapter {
         return this.cache.labTracker;
     }
 
-    async addLab(lab) {
+    async addLab(lab, skipDB = false) {
         this.cache.labTracker.push(lab);
-        await indexedDBStorage.put('labTracking', lab);
+        if (!skipDB) {
+            await indexedDBStorage.put(indexedDBStorage.STORES.LAB_TRACKER, lab);
+        }
         return lab;
     }
 
-    async updateLab(labId, lab) {
+    async updateLab(labId, lab, skipDB = false) {
         const index = this.cache.labTracker.findIndex(l => l.LabID === labId);
         if (index !== -1) {
             this.cache.labTracker[index] = { ...lab, LabID: labId };
         }
-        await indexedDBStorage.put('labTracking', { ...lab, LabID: labId });
+        if (!skipDB) {
+            await indexedDBStorage.put(indexedDBStorage.STORES.LAB_TRACKER, { ...lab, LabID: labId });
+        }
         return { ...lab, LabID: labId };
     }
 
