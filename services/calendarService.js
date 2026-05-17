@@ -43,7 +43,29 @@ class CalendarService {
         const bloodTests = ['Blood Test', 'C&S Results'];
         const imagingTests = ['USG', 'Echo', 'ECG', 'Xray', 'CT', 'MRI', 'Other'];
 
-        let filteredInstructions = [...this.instructions];
+        // Robust exclusion check
+        const isExcluded = (str) => {
+            if (!str) return false;
+            const s = str.toLowerCase().trim();
+            return s === 'prn' || 
+                   s === 'p.r.n' ||
+                   s === 'p.r.n (as needed)' || 
+                   s === 'prn (as needed)' ||
+                   s === 'transfer to hospital' ||
+                   s === 'transfer' ||
+                   s.includes('transfer to hospital') ||
+                   s.includes('p.r.n') ||
+                   s.includes('as needed') ||
+                   s.includes('as-needed') ||
+                   s.includes('transfer to') ||
+                   /\bprn\b/.test(s);
+        };
+
+        let filteredInstructions = this.instructions.filter(inst => {
+            const other = (inst.otherInstruction || '').trim();
+            const general = (inst.generalInstruction || '').trim();
+            return !isExcluded(other) && !isExcluded(general);
+        });
 
         // Apply filters
         if (filters.doctor) {
@@ -172,13 +194,22 @@ class CalendarService {
 
             this.calendarEvents[date][doctorName].types.add('follow-up');
 
-            // Add tests before visit annotation (only blood tests)
+            // Add tests before visit annotation (only blood tests) - Unless it's "Do Tests Before"
             if (inst.selectedTests && inst.selectedTests.length > 0) {
+                const isDoTestsBefore = (inst.otherInstruction || '').trim().toLowerCase() === 'do tests before';
                 const hasBloodTests = inst.selectedTests.some(t => bloodTests.includes(t));
-                if (hasBloodTests) {
+                
+                if (isDoTestsBefore || hasBloodTests) {
                     this.calendarEvents[date][doctorName].types.add('tests-before');
-                    const bloodTestsList = inst.selectedTests.filter(t => bloodTests.includes(t));
-                    this.calendarEvents[date][doctorName].patients[this.calendarEvents[date][doctorName].patients.length - 1].tests = bloodTestsList;
+                    const lastPatient = this.calendarEvents[date][doctorName].patients[this.calendarEvents[date][doctorName].patients.length - 1];
+                    
+                    if (isDoTestsBefore) {
+                        // For "Do Tests Before", show all selected tests
+                        lastPatient.tests = inst.selectedTests;
+                    } else {
+                        // For other types, still only show blood tests as follow-up annotations
+                        lastPatient.tests = inst.selectedTests.filter(t => bloodTests.includes(t));
+                    }
                 }
             }
         });
@@ -200,14 +231,26 @@ class CalendarService {
      * @param {Array} imagingTests
      */
     generatePendingTestEvents(instructions, bloodTests, imagingTests) {
+        const today = new Date().toISOString().split('T')[0];
         const afterResultsInstructions = instructions.filter(inst => inst.otherInstruction === 'After Results');
 
         afterResultsInstructions.forEach(inst => {
             const requiredTests = inst.selectedTests || [];
-            if (requiredTests.length === 0) return;
 
-            // Match lab records by patientId only (strict matching to avoid name duplicates)
-            const patientLabs = window.labService.getLabsByPatientId(inst.patientId);
+            // Match lab records
+            let patientLabs = [];
+            
+            // 1. Try to match by specific linkedLabIds if stored in instruction
+            if (inst.linkedLabIds && inst.linkedLabIds.length > 0) {
+                patientLabs = window.labService.labRecords.filter(lab => 
+                    inst.linkedLabIds.includes(lab.labId) || inst.linkedLabIds.includes(lab.id)
+                );
+            }
+            
+            // 2. Fallback: match by patientId only if no specific lab linked
+            if (patientLabs.length === 0) {
+                patientLabs = window.labService.getLabsByPatientId(inst.patientId);
+            }
 
             const completedLabs = patientLabs.filter(lab =>
                 lab.status === 'Partial Result Out' || lab.status === 'Complete Result Out'
@@ -218,11 +261,7 @@ class CalendarService {
             const pendingBlood = requiredTests.filter(t => bloodTests.includes(t) && !completedTestNames.includes(t));
             const pendingImaging = requiredTests.filter(t => imagingTests.includes(t) && !completedTestNames.includes(t));
 
-            // Only create pending event if there are pending tests
-            if (pendingBlood.length === 0 && pendingImaging.length === 0) return;
-
             // Get lab status from the patient's lab tracker entries
-            // Since lab tracker stores facility name (not test name), we get the overall lab status for this patient
             let patientLabStatus = 'Not Started';
             if (patientLabs.length > 0) {
                 // Get the most recent lab record status
@@ -238,12 +277,8 @@ class CalendarService {
                 bloodTestStatus[test] = patientLabStatus;
             });
 
-            // Use today's date or the latest lab date for the pending notification
-            const latestLabDate = patientLabs.length > 0 ? patientLabs.sort((a, b) =>
-                new Date(b.dateTime) - new Date(a.dateTime)
-            )[0].dateTime.split('T')[0] : new Date().toISOString().split('T')[0];
-
-            const date = latestLabDate;
+            // "After Results" instructions should always appear on "today" until they are completed or handled
+            const date = today;
             const doctorName = window.instructionService.getDoctorName(inst);
 
             if (!this.calendarEvents[date]) {
@@ -260,7 +295,7 @@ class CalendarService {
 
             // Check if patient already has a pending entry
             const exists = this.calendarEvents[date][doctorName].patients.some(p =>
-                p.type === 'pending' && p.instruction.patientId === inst.patientId
+                p.type === 'pending' && p.instruction.id === inst.id
             );
 
             if (!exists) {
@@ -279,9 +314,11 @@ class CalendarService {
                     },
                     bloodTestStatus: bloodTestStatus,
                     appointmentDate: appointmentDate,
-                    doctorName: doctorName
-                });
-
+                    doctorName: doctorName,
+                    labRecords: patientLabs, // Include lab records for linking
+                    linkedLabIds: inst.linkedLabIds || [],
+                    hasPendingTests: allPendingTests.length > 0
+                    });
                 this.calendarEvents[date][doctorName].types.add('pending');
             }
         });

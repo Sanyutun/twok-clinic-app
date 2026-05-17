@@ -309,8 +309,10 @@ window.addEventListener('queue-synced', (e) => {
 Real-time updates via WebSocket:
 
 ```javascript
-// Connect to WebSocket
-const ws = new WebSocket('ws://localhost:3099');
+// Auto-detect based on current host (e.g., ws://localhost:9010)
+const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const wsUrl = `${protocol}//${window.location.host}`;
+const ws = new WebSocket(wsUrl);
 
 // Listen for appointment status changes
 ws.onmessage = (event) => {

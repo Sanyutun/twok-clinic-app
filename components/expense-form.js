@@ -666,9 +666,14 @@ class ExpenseFormComponent {
     async edit(expenseData) {
         this.currentAppointment = null;
         this.isEditing = true;
-        this.editingExpenseId = expenseData.id;
+        // Capture ANY available ID (modern or legacy)
+        this.editingExpenseId = expenseData.id || expenseData.ExpenseID || expenseData.expense_id;
         this.originalExpenseData = expenseData; // Store for preserving dateTime
         this.editingLabId = null; // Reset lab ID
+
+        if (!this.editingExpenseId) {
+            console.warn('[ExpenseForm] Editing expense with no ID:', expenseData);
+        }
 
         // If this is a Lab expense, find the associated lab tracker entry
         const expenseCategory = expenseData.expense_type || expenseData.category || '';
@@ -977,21 +982,6 @@ class ExpenseFormComponent {
                 } catch (labError) {
                     console.error('[ExpenseForm] Failed to create lab entry:', labError);
                 }
-            }
-
-            // Success! Add to global expenses array, re-render, and hide form
-            if (typeof window.expenses !== 'undefined') {
-                if (this.isEditing && this.editingExpenseId) {
-                    // Update existing expense in array
-                    const idx = window.expenses.findIndex(e => e.id === expenseData.id);
-                    if (idx > -1) {
-                        window.expenses[idx] = expenseData;
-                    }
-                } else {
-                    // Add new expense to array
-                    window.expenses.push(expenseData);
-                }
-                console.log('[ExpenseForm] Expenses array updated, total count:', window.expenses.length);
             }
 
             console.log('[ExpenseForm] ✅ Expense saved successfully!');

@@ -12,8 +12,7 @@ const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.HTTP_PORT || process.env.PORT || 9010;
-const WS_PORT = process.env.WS_PORT || 3099;
+const PORT = process.env.PORT || 9010;
 
 // ==========================================
 // SUPABASE CLIENT
@@ -52,35 +51,30 @@ app.get('/', (req, res) => {
 // ==========================================
 const server = http.createServer(app);
 
-// Initialize WebSocket Server
-let wss;
-if (WS_PORT && WS_PORT != PORT) {
-    // Listen on a separate port for WebSocket if WS_PORT is different from HTTP PORT
-    wss = new WebSocketServer({ port: parseInt(WS_PORT) });
-    console.log(`📡 WebSocket server listening on port ${WS_PORT}`);
-} else {
-    // Share the same port as HTTP
-    wss = new WebSocketServer({ server });
-    console.log(`📡 WebSocket server sharing port ${PORT}`);
-}
+// Initialize WebSocket Server (sharing the same port as HTTP)
+const wss = new WebSocketServer({ server });
+console.log(`📡 WebSocket server sharing port ${PORT}`);
 
 // WebSocket client tracking
-const wsClients = new Set();
+const wsClients = new Map(); // Use Map to store client info
+let nextClientId = 1;
 
 wss.on('connection', (ws) => {
-    wsClients.add(ws);
-    console.log(`📡 WebSocket client connected. Total: ${wsClients.size}`);
+    const clientId = nextClientId++;
+    wsClients.set(ws, { id: clientId });
+    console.log(`📡 WebSocket client ${clientId} connected. Total: ${wsClients.size}`);
     
-    // Send connection acknowledgment
+    // Send connection acknowledgment with clientId
     ws.send(JSON.stringify({
         type: 'connection_ack',
+        clientId: clientId,
         timestamp: new Date().toISOString()
     }));
 
     ws.on('message', async (message) => {
         try {
             const data = JSON.parse(message.toString());
-            console.log(`Received message type: ${data.type}`);
+            console.log(`Received message type: ${data.type} from client ${clientId}`);
             
             // Handle heartbeat
             if (data.type === 'heartbeat') {
@@ -92,10 +86,9 @@ wss.on('connection', (ws) => {
             }
 
             // Broadcast to all clients (including TV view specific events)
-            wsClients.forEach(client => {
+            wsClients.forEach((info, client) => {
                 if (client.readyState === 1) {
-                    // For relaying events from the app to TV displays, 
-                    // we usually include the sender if it's a broadcast
+                    // Relay the message as-is
                     client.send(JSON.stringify(data));
                 }
             });
@@ -106,14 +99,14 @@ wss.on('connection', (ws) => {
 
     ws.on('close', () => {
         wsClients.delete(ws);
-        console.log(`📡 WebSocket client disconnected. Total: ${wsClients.size}`);
+        console.log(`📡 WebSocket client ${clientId} disconnected. Total: ${wsClients.size}`);
     });
 });
 
 // Broadcast helper
 function broadcast(event, data) {
-    const message = JSON.stringify({ event, data });
-    wsClients.forEach(client => {
+    const message = JSON.stringify({ type: event, data }); // Use 'type' instead of 'event' for frontend compatibility
+    wsClients.forEach((info, client) => {
         if (client.readyState === 1) {
             client.send(message);
         }
@@ -123,11 +116,24 @@ function broadcast(event, data) {
 // ==========================================
 // HEALTH CHECK
 // ==========================================
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
+    let supabaseStatus = 'unknown';
+    try {
+        const { data, error } = await supabase.from('patients').select('count', { count: 'exact', head: true });
+        if (error) throw error;
+        supabaseStatus = 'connected';
+    } catch (err) {
+        console.error('[Health] Supabase connection check failed:', err.message);
+        supabaseStatus = `error: ${err.message}`;
+    }
+
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        clients: wsClients.size 
+        clients: wsClients.size,
+        supabase: supabaseStatus,
+        environment: process.env.NODE_ENV || 'development',
+        nodeVersion: process.version
     });
 });
 
@@ -670,8 +676,14 @@ app.delete('/api/hospitals/:id', async (req, res) => {
 // BATCH SYNC ENDPOINT
 // ==========================================
 app.post('/api/sync', async (req, res) => {
+    let currentOp = null;
     try {
         const { operations } = req.body;
+        if (!operations || !Array.isArray(operations)) {
+            return res.status(400).json({ error: 'Invalid operations format', success: false });
+        }
+
+        console.log(`[Sync] 📥 Received ${operations.length} operations`);
         const results = [];
 
         // Define table priority to handle foreign key constraints
@@ -692,7 +704,6 @@ app.post('/api/sync', async (req, res) => {
         // Sort operations: 
         // 1. Upserts (insert/update) should happen parents-first (ascending priority)
         // 2. Deletes should happen children-first (descending priority)
-        // 3. Within the same table and operation type, maintain original order
         const sortedOperations = [...operations].sort((a, b) => {
             const priorityA = TABLE_PRIORITY[a.table] || 99;
             const priorityB = TABLE_PRIORITY[b.table] || 99;
@@ -700,54 +711,57 @@ app.post('/api/sync', async (req, res) => {
             const isDeleteA = a.operation === 'delete';
             const isDeleteB = b.operation === 'delete';
 
-            // If one is delete and other is not, upserts come before deletes generally?
-            // Actually, if we delete a parent, we must delete children first.
-            // If we insert a child, we must insert parent first.
-            
             if (isDeleteA && !isDeleteB) return 1; // Upserts first
             if (!isDeleteA && isDeleteB) return -1; // Upserts first
             
             if (!isDeleteA && !isDeleteB) {
-                // Both are upserts: Ascending priority (parents first)
-                return priorityA - priorityB;
+                return priorityA - priorityB; // Parents first
             } else {
-                // Both are deletes: Descending priority (children first)
-                return priorityB - priorityA;
+                return priorityB - priorityA; // Children first (for deletes)
             }
         });
 
+        // Group same-table, same-operation upserts to minimize requests
+        // (Deletes should probably stay individual or be careful with id lists)
         for (const op of sortedOperations) {
+            currentOp = op;
             const { table, operation, data, id } = op;
+            console.log(`[Sync] ⏳ Processing ${operation} on ${table} (ID: ${id || 'new'})`);
+            
             let result;
+            try {
+                switch (operation) {
+                    case 'insert':
+                    case 'update':
+                    case 'upsert':
+                        // Ensure ID is present in data for upsert
+                        const upsertData = { ...data };
+                        if (id && !upsertData.id) upsertData.id = id;
+                        
+                        result = await supabase.from(table).upsert(upsertData).select();
+                        break;
+                    case 'delete':
+                        result = await supabase.from(table).delete().eq('id', id);
+                        break;
+                    default:
+                        throw new Error(`Unknown operation: ${operation}`);
+                }
 
-            switch (operation) {
-                case 'insert':
-                case 'update':
-                case 'upsert':
-                    // Use upsert for all to be resilient against primary key conflicts
-                    result = await supabase.from(table).upsert(data).select();
-                    break;
-                case 'delete':
-                    result = await supabase.from(table).delete().eq('id', id);
-                    break;
-                default:
-                    throw new Error(`Unknown operation: ${operation}`);
-            }
+                if (result.error) {
+                    console.error(`[Sync] ❌ Supabase Error in ${operation} on ${table}:`, result.error);
+                    const customError = new Error(result.error.message || 'Supabase operation failed');
+                    customError.details = result.error.details;
+                    customError.hint = result.error.hint;
+                    customError.code = result.error.code;
+                    throw customError;
+                }
 
-            if (result.error) {
-                console.error(`[Sync] ❌ Error in ${operation} on ${table} (ID: ${id}):`, {
-                    message: result.error.message,
-                    details: result.error.details,
-                    hint: result.error.hint,
-                    code: result.error.code
-                });
-                const customError = new Error(result.error.message);
-                customError.details = result.error.details;
-                customError.hint = result.error.hint;
-                customError.code = result.error.code;
-                throw customError;
+                results.push({ success: true, table, operation, id: id || (result.data && result.data[0] ? result.data[0].id : null) });
+                console.log(`[Sync] ✅ Completed ${operation} on ${table}`);
+            } catch (innerError) {
+                console.error(`[Sync] ❌ Failed during ${operation} on ${table}:`, innerError);
+                throw innerError; // Rethrow to catch in global block
             }
-            results.push({ success: true, table, operation, id: id || (data ? data.id : null) });
         }
 
         broadcast('sync_completed', { operations: operations.length });
@@ -756,8 +770,8 @@ app.post('/api/sync', async (req, res) => {
         console.error('[Sync] Global error:', error);
         res.status(500).json({ 
             error: error.message, 
-            details: error.details,
-            hint: error.hint,
+            details: error.details || (currentOp ? `Failed at ${currentOp.operation} on ${currentOp.table}` : 'Unknown'),
+            hint: error.hint || 'Check server logs for detailed stack trace',
             code: error.code,
             success: false 
         });

@@ -111,42 +111,9 @@ function openDB() {
  * @returns {Promise<Array>}
  */
 async function getAll(storeName) {
-    // Use storage adapter if available
-    if (storageAdapterInstance) {
-        try {
-            switch (storeName) {
-                case STORES.PATIENTS:
-                    return await storageAdapterInstance.getPatients();
-                case STORES.DOCTORS:
-                    return await storageAdapterInstance.getDoctors();
-                case STORES.APPOINTMENTS:
-                    return await storageAdapterInstance.getAppointments();
-                case STORES.INSTRUCTIONS:
-                    return await storageAdapterInstance.getInstructions();
-                case STORES.EXPENSES:
-                    return await storageAdapterInstance.getExpenses();
-                case STORES.LAB_TRACKER:
-                    return await storageAdapterInstance.getLabTracker();
-                case STORES.ADDRESSES:
-                    return storageAdapterInstance.getAddresses();
-                case STORES.SPECIALITIES:
-                    return storageAdapterInstance.getSpecialities();
-                case STORES.HOSPITALS:
-                    return storageAdapterInstance.getHospitals();
-                case STORES.EXPENSE_CATEGORIES:
-                    return storageAdapterInstance.getExpenseCategories();
-                default:
-                    // Fall back to IndexedDB
-                    break;
-            }
-        } catch (error) {
-            console.warn('[TWOKDB] Storage adapter failed, falling back to IndexedDB:', error);
-        }
-    }
-    
-    // Fall back to IndexedDB
+    // Always fetch from IndexedDB to ensure fresh data for real-time updates
     const db = await openDB();
-    return new Promise((resolve, reject) => {
+    const records = await new Promise((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readonly');
         const store = transaction.objectStore(storeName);
         const request = store.getAll();
@@ -154,6 +121,13 @@ async function getAll(storeName) {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(new Error('Failed to get all items: ' + request.error));
     });
+
+    // If storage adapter is present, keep its cache in sync with the fresh data
+    if (storageAdapterInstance && typeof storageAdapterInstance.updateCache === 'function') {
+        storageAdapterInstance.updateCache(storeName, records);
+    }
+    
+    return records;
 }
 
 /**
@@ -385,7 +359,7 @@ async function bulkPut(storeName, items, skipSync = false) {
     }
 
     const db = await openDB();
-    return new Promise((resolve, reject) => {
+    await new Promise((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readwrite');
         const store = transaction.objectStore(storeName);
 
@@ -396,6 +370,17 @@ async function bulkPut(storeName, items, skipSync = false) {
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(new Error('Failed to bulk put items: ' + transaction.error));
     });
+
+    // If storage adapter is present, refresh its cache to ensure consistency
+    // We fetch all records because bulkPut might be a partial update or full replace
+    if (storageAdapterInstance && typeof storageAdapterInstance.updateCache === 'function') {
+        const transaction = db.transaction(storeName, 'readonly');
+        const store = transaction.objectStore(storeName);
+        const request = store.getAll();
+        request.onsuccess = () => {
+            storageAdapterInstance.updateCache(storeName, request.result);
+        };
+    }
 }
 
 /**

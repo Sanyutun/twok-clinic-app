@@ -155,7 +155,10 @@ class PharmacistCornerApp {
      */
     setupWebSocket() {
         if ('WebSocket' in window) {
-            const wsUrl = 'ws://localhost:3099';
+            // Auto-detect WebSocket URL based on current host
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            const wsUrl = `${protocol}//${host}`;
             
             try {
                 this.ws = new WebSocket(wsUrl);

@@ -1182,7 +1182,7 @@
             <div class="calendar-header-top" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
                 <h2 style="margin: 0; font-size: 1.25rem; font-weight: 600;">🗓️ Calendar View</h2>
                 <div class="calendar-status">
-                    <span id="connectionStatus" class="status-indicator online" title="Online"></span>
+                    <span id="calendarConnectionStatus" class="status-indicator online" title="Online"></span>
                 </div>
             </div>
 
@@ -1986,7 +1986,7 @@
     </div>
 
     <!-- Online/Offline Status Indicator -->
-    <div id="connectionStatus" class="connection-status online">🟢 Online</div>
+    <div id="globalConnectionStatus" class="connection-status online">🟢 Online</div>
 
     <!-- Sync Status Indicator -->
     <div id="syncStatus" class="sync-status hidden">🔄 Syncing...</div>
@@ -2040,7 +2040,7 @@
         // Update sync status UI
         function updateSyncStatusUI(event, data) {
             const syncStatusEl = document.getElementById('syncStatus');
-            const connectionStatusEl = document.getElementById('connectionStatus');
+            const connectionStatusEl = document.getElementById('globalConnectionStatus');
             
             if (event === 'status-change') {
                 if (data.status === 'syncing') {
@@ -2106,7 +2106,7 @@
         const pwaDismissBtn = document.getElementById('pwaDismissBtn');
         const pwaInstallPromptClose = document.getElementById('pwaInstallPromptClose');
         const headerInstallBtn = document.getElementById('headerInstallBtn');
-        const connectionStatus = document.getElementById('connectionStatus');
+        const globalConnectionStatusEl = document.getElementById('globalConnectionStatus');
 
         // Listen for beforeinstallprompt event
         window.addEventListener('beforeinstallprompt', (e) => {
@@ -2208,22 +2208,22 @@
         });
 
         // Online/Offline status handling
-        function updateConnectionStatus() {
+        function updateGlobalConnectionStatus() {
             if (navigator.onLine) {
-                connectionStatus.textContent = '🟢 Online';
-                connectionStatus.className = 'connection-status online';
+                globalConnectionStatusEl.textContent = '🟢 Online';
+                globalConnectionStatusEl.className = 'connection-status online';
             } else {
-                connectionStatus.textContent = '🔴 Offline';
-                connectionStatus.className = 'connection-status offline';
+                globalConnectionStatusEl.textContent = '🔴 Offline';
+                globalConnectionStatusEl.className = 'connection-status offline';
                 showNotification('You are offline. Some features may be limited.', 'error');
             }
         }
 
-        window.addEventListener('online', updateConnectionStatus);
-        window.addEventListener('offline', updateConnectionStatus);
+        window.addEventListener('online', updateGlobalConnectionStatus);
+        window.addEventListener('offline', updateGlobalConnectionStatus);
 
         // Initial check
-        updateConnectionStatus();
+        updateGlobalConnectionStatus();
     </script>
 </body>
 </html>

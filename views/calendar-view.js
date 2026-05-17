@@ -141,7 +141,7 @@ class CalendarViewApp {
      * Update connection status indicator
      */
     updateConnectionStatus() {
-        const statusEl = document.getElementById('connectionStatus');
+        const statusEl = document.getElementById('calendarConnectionStatus');
         if (!statusEl) return;
         
         if (navigator.onLine) {

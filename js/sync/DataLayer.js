@@ -43,7 +43,7 @@ class DataLayer {
                 'doctorName', 'appointmentDate', 'bookingNumber', 'generalInstruction', 
                 'returnDuration', 'returnUnit', 'nextAppointmentDate', 'followUpDoctor', 
                 'otherInstruction', 'transferHospital', 'selectedTests', 
-                'linkedLabIds', 'labTrackerId', 'createdAt', 'createdTime', 'updatedAt', 'editedTime'
+                'linkedLabIds', 'createdAt', 'createdTime', 'updatedAt', 'editedTime'
             ],
             'expenses': [
                 'id', 'amount', 'category', 'remark', 'patientId', 'patientName', 
@@ -988,9 +988,16 @@ class DataLayer {
                 if (window[arrayName]) {
                     const flattenedRecord = this.flattenRecordIfNeeded(table, frontendRecord);
                     const index = window[arrayName].findIndex(item => {
-                        let itemId = (typeof item === 'string') ? item : (item.id || item.labId || item.value);
-                        let recordId = (record.id || record.labId || frontendRecord.id);
-                        return itemId == recordId; // Use loose equality for safety
+                        if (typeof item === 'string') return item == (record.id || frontendRecord.id);
+                        
+                        // Robust ID matching: check all possible ID fields (modern and legacy)
+                        const itemId = item.id || item.labId || item.value || 
+                                     item.ExpenseID || item.PatientID || item.DoctorID || 
+                                     item.AppointmentID || item.InstructionID || item.LabID;
+                        
+                        const incomingId = record.id || record.labId || frontendRecord.id;
+                        
+                        return itemId == incomingId; // Use loose equality for safety
                     });
 
                     console.log(`[DataLayer] Realtime ${eventType} on ${table}: index found=${index}`);

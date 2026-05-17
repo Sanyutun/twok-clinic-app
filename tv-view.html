@@ -570,24 +570,10 @@
         </div>
     </div>
 
-    <script type="module">
-        import { indexedDBStorage } from './js/storage/indexedDB.js';
-        
-        // Expose to global scope for legacy code
-        window.indexedDBStorage = indexedDBStorage;
-        
-        // Simple TWOKDB wrapper to use the same IndexedDB as main app
-        window.TWOKDB = {
-            STORES: {
-                APPOINTMENTS: 'appointments',
-                PATIENTS: 'patients',
-                DOCTORS: 'doctors'
-            },
-            getAll: async function(storeName) {
-                return await indexedDBStorage.getAll(storeName);
-            }
-        };
-
+    <script src="indexeddb.js"></script>
+    <script>
+        // Expose to global scope for compatibility
+        window.indexedDBStorage = window.TWOKDB;
         console.log('[TV] IndexedDB loaded successfully');
     </script>
     <script>

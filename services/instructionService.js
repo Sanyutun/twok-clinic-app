@@ -67,17 +67,41 @@ class InstructionService {
         const data = instructions || this.instructions;
         
         return data.filter(inst => {
-            // Exclude PRN and Transfer to Hospital
-            if (inst.otherInstruction === 'PRN' || inst.otherInstruction === 'Transfer to Hospital') {
+            const other = (inst.otherInstruction || '').trim();
+            const general = (inst.generalInstruction || '').trim();
+            const otherLower = other.toLowerCase();
+            const generalLower = general.toLowerCase();
+
+            // Exclude PRN and Transfer to Hospital (case-insensitive check for multiple variations)
+            // Check both otherInstruction and generalInstruction fields
+            const isExcluded = (str) => {
+                if (!str) return false;
+                const s = str.toLowerCase().trim();
+                return s === 'prn' || 
+                       s === 'p.r.n' ||
+                       s === 'p.r.n (as needed)' || 
+                       s === 'prn (as needed)' ||
+                       s === 'transfer to hospital' ||
+                       s === 'transfer' ||
+                       s.includes('transfer to hospital') ||
+                       s.includes('p.r.n') ||
+                       s.includes('as needed') ||
+                       s.includes('as-needed') ||
+                       s.includes('transfer to') ||
+                       // Also check for PRN as a word to avoid matching "spring"
+                       /\bprn\b/.test(s);
+            };
+
+            if (isExcluded(other) || isExcluded(general)) {
                 return false;
             }
             
             // Must have either nextAppointmentDate, returnDuration, selectedTests, or otherInstruction
-            return inst.nextAppointmentDate || 
+            return (inst.nextAppointmentDate && inst.nextAppointmentDate.trim() !== '') || 
                    (inst.returnDuration && inst.returnUnit) ||
                    (inst.selectedTests && inst.selectedTests.length > 0) || 
-                   inst.otherInstruction === 'After Results' ||
-                   inst.otherInstruction === 'Do Tests Before';
+                   otherLower === 'after results' ||
+                   otherLower === 'do tests before';
         });
     }
 

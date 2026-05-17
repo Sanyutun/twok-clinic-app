@@ -97,6 +97,31 @@ class StorageAdapter {
         }
     }
 
+    /**
+     * Update internal cache for a specific store
+     * Called by IndexedDB wrapper to keep cache in sync
+     */
+    updateCache(storeName, data) {
+        const mapping = {
+            'patients': 'patients',
+            'doctors': 'doctors',
+            'appointments': 'appointments',
+            'instructions': 'instructions',
+            'expenses': 'expenses',
+            'lab_records': 'labTracker',
+            'addresses': 'addresses',
+            'specialities': 'specialities',
+            'hospitals': 'hospitals',
+            'expense_categories': 'expenseCategories'
+        };
+        
+        const cacheKey = mapping[storeName];
+        if (cacheKey && this.cache[cacheKey]) {
+            this.cache[cacheKey] = data;
+            // console.log(`[StorageAdapter] Cache updated for ${storeName} (${data.length} items)`);
+        }
+    }
+
     // ==================== PATIENTS ====================
 
     async getPatients() {

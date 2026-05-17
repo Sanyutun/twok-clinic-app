@@ -34,6 +34,7 @@ class InstructionFormComponent {
                         <form id="globalInstructionForm">
                             <input type="hidden" id="globalInstructAppointmentId">
                             <input type="hidden" id="globalInstructPatientId">
+                            <input type="hidden" id="globalInstructLinkedLabIds">
 
                             <div class="form-group">
                                 <label>Patient Name</label>
@@ -285,16 +286,22 @@ class InstructionFormComponent {
 
     /**
      * Show form with appointment data
+     * @param {Object} appointment - Appointment data
+     * @param {Array<string>} linkedLabIds - Optional linked lab IDs
      */
-    show(appointment) {
+    show(appointment, linkedLabIds = []) {
         this.currentAppointment = appointment;
         
         // Populate form fields
         document.getElementById('globalInstructAppointmentId').value = appointment.id || appointment.appointment_id || '';
-        document.getElementById('globalInstructPatientId').value = appointment.patient_id || '';
+        document.getElementById('globalInstructPatientId').value = appointment.patient_id || appointment.patientId || '';
         document.getElementById('globalInstructPatientName').value = appointment.patient_name || appointment.patientName || '';
         document.getElementById('globalInstructDoctorName').value = appointment.doctor_name || appointment.doctorName || '';
         document.getElementById('globalInstructBookingNumber').value = appointment.booking_number || appointment.bookingNumber || '-';
+        
+        // Handle linked lab IDs
+        const labIds = linkedLabIds && linkedLabIds.length > 0 ? linkedLabIds : (appointment.linkedLabIds || []);
+        document.getElementById('globalInstructLinkedLabIds').value = JSON.stringify(labIds);
         
         // Reset form
         document.getElementById('instructionType').value = '';
@@ -322,6 +329,14 @@ class InstructionFormComponent {
         const appointment = this.currentAppointment || {};
         const apptId = appointment.id || appointment.appointment_id;
         
+        let linkedLabIds = [];
+        try {
+            const linkedLabIdsVal = document.getElementById('globalInstructLinkedLabIds').value;
+            linkedLabIds = linkedLabIdsVal ? JSON.parse(linkedLabIdsVal) : [];
+        } catch (e) {
+            console.error('[InstructionForm] Failed to parse linked lab IDs:', e);
+        }
+
         const instructionData = {
             id: 'inst_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
             appointmentId: apptId,
@@ -335,6 +350,7 @@ class InstructionFormComponent {
             otherInstruction: document.getElementById('instructionType').value,
             generalInstruction: document.getElementById('instructionNote').value,
             nextAppointmentDate: document.getElementById('nextVisitDate').value,
+            linkedLabIds: linkedLabIds,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };

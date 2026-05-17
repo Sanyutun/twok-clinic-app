@@ -65,7 +65,10 @@
 
     <script src="indexeddb.js"></script>
     <script>
-        const WS_URL = 'ws://localhost:3099';
+        // Auto-detect WebSocket URL
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host || 'localhost:3000';
+        const WS_URL = `${protocol}//${host}`;
         let ws = null;
         
         function log(message, type = '') {

@@ -72,6 +72,12 @@ const WS_PROTOCOL = typeof window !== 'undefined' && window.location.protocol ==
 const WS_HOST = typeof window !== 'undefined' ? window.location.host : 'localhost:3000';
 const WS_URL = `${WS_PROTOCOL}//${WS_HOST}`;
 const WS_RECONNECT_DELAY = 3000; // 3 seconds
+// Use a persistent client ID for this session to avoid redundant reloads from self
+let myClientId = sessionStorage.getItem('twok_client_id');
+if (!myClientId) {
+    myClientId = Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+    sessionStorage.setItem('twok_client_id', myClientId);
+}
 let ws = null;
 let wsReconnectTimer = null;
 
@@ -139,7 +145,15 @@ function initWebSocket() {
             console.log('[WS] Received message:', data.type);
             
             if (data.type === 'connection_ack') {
-                console.log('WebSocket connection acknowledged');
+                console.log('WebSocket connection acknowledged. Client ID:', data.clientId);
+                // We keep our local persistent myClientId instead of using the server-provided one
+                // to ensure consistent senderId matching across reloads
+            }
+
+            // Ignore messages sent by this client to avoid redundant reloads and race conditions
+            if (data.data && data.data.senderId == myClientId) {
+                console.log('[WS] Ignoring message from self');
+                return;
             }
             
             // Handle appointment changes and refresh data
@@ -176,9 +190,15 @@ function initWebSocket() {
  */
 function sendQueueEvent(type, data = {}) {
     if (ws && ws.readyState === WebSocket.OPEN) {
+        // Include senderId in the data payload
+        const payload = {
+            ...data,
+            senderId: myClientId
+        };
+        
         ws.send(JSON.stringify({
             type: type,
-            data: data,
+            data: payload,
             timestamp: new Date().toISOString()
         }));
     } else {
@@ -2488,44 +2508,54 @@ function renderAppointmentTable(filteredAppointments = null) {
 function buildLabStatusIcons(appt) {
     if (!appt) return '';
 
-    // Find all lab records for this patient by ID
-    let patientLabs = [];
-    if (appt.patientId) {
-        patientLabs = labRecords.filter(lab => lab.patientId === appt.patientId);
-    }
-    
-    // Fallback: if no labs found by ID, try matching by patient name
-    if (patientLabs.length === 0 && appt.patientName) {
-        const normalizedName = appt.patientName.toLowerCase().trim();
-        patientLabs = labRecords.filter(lab => {
-            const labName = (lab.patientName || '').toLowerCase().trim();
-            return labName === normalizedName || labName.includes(normalizedName) || normalizedName.includes(labName);
-        });
-    }
+    // Use the robust check function we already created
+    const pendingLabs = checkLabResultsForPatient(appt.patientId, appt.patientName);
 
-    if (patientLabs.length === 0) return '';
+    // Further filter for results not yet received by patient
+    const unreceivedLabs = pendingLabs.filter(lab => {
+        const timeline = lab.timeline || {};
+        return !timeline.patientReceived;
+    });
 
-    // Check for results that are out but not received by patient
-    const pendingLabs = patientLabs.filter(lab => 
-        lab.status === 'Partial Result Out' || lab.status === 'Complete Result Out'
-    );
-
-    if (pendingLabs.length === 0) return '';
+    if (unreceivedLabs.length === 0) return '';
 
     let html = '<div class="lab-status-icons">';
 
-    pendingLabs.forEach(lab => {
+    // Group by labId to avoid duplicate icons for the same lab record if it matches multiple times
+    const uniqueLabs = [];
+    const seenLabIds = new Set();
+    
+    unreceivedLabs.forEach(lab => {
+        if (!seenLabIds.has(lab.labId)) {
+            uniqueLabs.push(lab);
+            seenLabIds.add(lab.labId);
+        }
+    });
+
+    uniqueLabs.forEach(lab => {
         const isPartial = lab.status === 'Partial Result Out';
-        const bgColor = isPartial ? '#fef3c7' : '#d1fae5';
-        const icon = isPartial ? '⚠️' : '📋';
-        const title = isPartial ? 'Partial results - some tests pending' : 'Complete results - awaiting patient pickup';
+        const isInform = lab.status === 'Inform to Doctor' || lab.status === 'Inform to Patient';
+        
+        let bgColor = '#d1fae5'; // Default for Complete
+        let icon = '📋';
+        let title = 'Complete results - awaiting patient pickup';
+        
+        if (isPartial) {
+            bgColor = '#fef3c7';
+            icon = '⚠️';
+            title = 'Partial results - some tests pending';
+        } else if (isInform) {
+            bgColor = '#e0f2fe';
+            icon = '📞';
+            title = `Status: ${lab.status}`;
+        }
 
         html += `
             <span 
                 class="lab-status-icon" 
                 title="${title}"
                 style="background-color: ${bgColor};"
-                onclick="showPatientLabDetails('${appt.patientId}', '${escapeHtml(appt.patientName)}')"
+                onclick="event.stopPropagation(); showPatientLabDetails('${lab.patientId || ''}', '${escapeHtml(lab.patientName || appt.patientName)}')"
             >
                 ${icon}
             </span>
@@ -2542,7 +2572,17 @@ function buildLabStatusIcons(appt) {
  * @param {string} patientName - Patient name
  */
 function showPatientLabDetails(patientId, patientName) {
-    const patientLabs = labRecords.filter(lab => lab.patientId === patientId);
+    // Use a robust way to find labs for this patient (all statuses)
+    const patientLabs = labRecords.filter(lab => {
+        // Match by ID if both have IDs
+        const matchesId = patientId && lab.patientId && String(lab.patientId) === String(patientId);
+        
+        // Match by Name if ID is missing or if we want extra robustness
+        const matchesName = patientName && lab.patientName && 
+                          lab.patientName.toLowerCase().trim() === patientName.toLowerCase().trim();
+        
+        return matchesId || (!patientId && matchesName) || (!lab.patientId && matchesName);
+    });
     
     if (patientLabs.length === 0) {
         showNotification('No lab records found for this patient', 'info');
@@ -2659,14 +2699,14 @@ function handleAppointmentAction(event, appointmentId) {
 /**
  * Mark appointment as Booked (from Noted)
  */
-function markAppointmentBooked(appointmentId) {
+async function markAppointmentBooked(appointmentId) {
     const index = appointments.findIndex(a => a.id === appointmentId);
     if (index === -1) return;
 
     const appt = appointments[index];
     appt.status = 'Booked';
     appt.bookedTime = toLocalISOString(new Date());
-    saveAppointmentsToStorage();
+    await saveAppointmentsToStorage();
     renderAppointmentTable();
     updateQueueSummary();
     showNotification('Appointment marked as Booked');
@@ -2685,7 +2725,7 @@ function markAppointmentBooked(appointmentId) {
  * Mark appointment as Arrived (from Booked)
  * Records arrival time and calculates penalty if late
  */
-function markAppointmentArrived(appointmentId) {
+async function markAppointmentArrived(appointmentId) {
     const index = appointments.findIndex(a => a.id === appointmentId);
     if (index === -1) return;
 
@@ -2705,7 +2745,7 @@ function markAppointmentArrived(appointmentId) {
         appt.penaltyTurns = 0;
     }
 
-    saveAppointmentsToStorage();
+    await saveAppointmentsToStorage();
     renderAppointmentTable();
     updateQueueSummary();
     showNotification('Patient marked as Arrived');
@@ -2743,14 +2783,14 @@ function getCurrentlyConsultingNumber(doctorName) {
 /**
  * Start consultation (from Arrived or Investigation)
  */
-function startConsultation(appointmentId) {
+async function startConsultation(appointmentId) {
     const index = appointments.findIndex(a => a.id === appointmentId);
     if (index === -1) return;
 
     const appt = appointments[index];
     appt.status = 'In Consult';
     appt.consultStartTime = toLocalISOString(new Date());
-    saveAppointmentsToStorage();
+    await saveAppointmentsToStorage();
     renderAppointmentTable();
     updateQueueSummary();
     showNotification('Consultation started');
@@ -2806,7 +2846,7 @@ function closeInvestigationDialog() {
 /**
  * Handle YES - patient needs investigation
  */
-function handleInvestigationYes() {
+async function handleInvestigationYes() {
     if (!currentConsultingAppointment) return;
 
     const index = appointments.findIndex(a => a.id === currentConsultingAppointment);
@@ -2818,7 +2858,7 @@ function handleInvestigationYes() {
     // Mark the patient as investigated
     appointments[index].status = 'Investigation';
     appointments[index].investigationOrderedTime = toLocalISOString(new Date());
-    saveAppointmentsToStorage();
+    await saveAppointmentsToStorage();
 
     // Track this patient as "just investigated" so they're excluded from next candidate list
     lastInvestigatedPatientId = currentConsultingAppointment;
@@ -2846,7 +2886,7 @@ function handleInvestigationYes() {
  * Each patient with penalty loses 1 turn (minimum 0)
  * @returns {Object} Object containing reduced flag and patients info
  */
-function reducePenaltyTurns() {
+async function reducePenaltyTurns() {
     const today = toLocalDateString(new Date());
     const waitingStatuses = ['Arrived', 'Investigation', 'Booked', 'Noted'];
     let penaltyReduced = false;
@@ -2868,7 +2908,7 @@ function reducePenaltyTurns() {
     });
 
     if (penaltyReduced) {
-        saveAppointmentsToStorage();
+        await saveAppointmentsToStorage();
     }
 
     return { reduced: penaltyReduced, patients: reducedPatients };
@@ -2877,7 +2917,7 @@ function reducePenaltyTurns() {
 /**
  * Handle NO - patient does not need investigation
  */
-function handleInvestigationNo() {
+async function handleInvestigationNo() {
     if (!currentConsultingAppointment) return;
 
     const index = appointments.findIndex(a => a.id === currentConsultingAppointment);
@@ -2891,9 +2931,9 @@ function handleInvestigationNo() {
     appt.completedTime = toLocalISOString(new Date());
 
     // Reduce penalty turns for all waiting patients
-    const penaltyResult = reducePenaltyTurns();
+    const penaltyResult = await reducePenaltyTurns();
 
-    saveAppointmentsToStorage();
+    await saveAppointmentsToStorage();
 
     // Now show patient selection section for next patient
     elements.patientSelectionSection.classList.remove('hidden');
@@ -3561,6 +3601,11 @@ function openInstructionForm(appointmentId) {
     elements.instructCustomTest.value = '';
     elements.customTestGroup.classList.add('hidden');
 
+    // Reset test checkboxes
+    if (elements.testCheckboxes) {
+        elements.testCheckboxes.forEach(cb => cb.checked = false);
+    }
+
     // Reset disabled state of duration and appointment date fields
     setDurationFieldsDisabled(false);
     setNextAppointmentDateDisabled(false);
@@ -3909,8 +3954,8 @@ function selectPatient(patientId) {
     }
 
     // Check for pending lab results immediately when patient is selected
-    console.log('selectPatient: about to check lab results for', patient.id);
-    displayPendingLabResults(patient.id);
+    console.log('selectPatient: about to check lab results for', patient.id, patient.name);
+    displayPendingLabResults(patient.id, patient.name);
 
     elements.appointmentDoctor.focus();
 }
@@ -4008,7 +4053,7 @@ function loadAppointmentToForm(appointmentId) {
     }
 
     // Check for pending lab results
-    displayPendingLabResults(a.patientId);
+    displayPendingLabResults(a.patientId, a.patientName);
 
     appointmentIsEditing = true;
     elements.appointmentFormTitle.textContent = 'Edit Appointment';
@@ -4018,7 +4063,7 @@ function loadAppointmentToForm(appointmentId) {
     openAppointmentFormModal();
 }
 
-function saveAppointment(e) {
+async function saveAppointment(e) {
     e.preventDefault();
 
     const patientName = elements.appointmentPatient.value.trim();
@@ -4146,7 +4191,7 @@ function saveAppointment(e) {
                 }
             });
             appointments[idx] = data;
-            saveAppointmentsToStorage();
+            await saveAppointmentsToStorage();
             showNotification('Appointment updated successfully!');
             
             // Broadcast update to TV displays via WebSocket
@@ -4154,7 +4199,7 @@ function saveAppointment(e) {
         }
     } else {
         appointments.push(data);
-        saveAppointmentsToStorage();
+        await saveAppointmentsToStorage();
         showNotification('Appointment created successfully!');
         
         // Broadcast new appointment to TV displays via WebSocket
@@ -4525,19 +4570,22 @@ window.createAppointmentFromCalendar = function(patientName, patientId, doctorNa
         resetCalendarAppointmentForm();
 
         // Pre-fill patient
+        const cleanPatientName = patientName.split(',')[0].trim();
         if (patientId) {
             const patient = patients.find(p => p.id === patientId);
             if (patient) {
                 selectCalendarPatient(patientId);
             } else {
-                elements.calendarApptPatient.value = patientName.split(',')[0];
+                elements.calendarApptPatient.value = cleanPatientName;
                 elements.calendarApptPatientId.value = '';
                 elements.calendarPatientInfoDisplay.style.display = 'none';
+                displayCalendarPendingLabResults(null, cleanPatientName);
             }
         } else {
-            elements.calendarApptPatient.value = patientName.split(',')[0];
+            elements.calendarApptPatient.value = cleanPatientName;
             elements.calendarApptPatientId.value = '';
             elements.calendarPatientInfoDisplay.style.display = 'none';
+            displayCalendarPendingLabResults(null, cleanPatientName);
         }
 
         // Pre-fill doctor
@@ -4638,7 +4686,7 @@ function selectCalendarPatient(patientId) {
     recalculateCalendarBookingNumber();
 
     // Check for pending lab results
-    displayCalendarPendingLabResults(patient.id);
+    displayCalendarPendingLabResults(patient.id, patient.name);
 
     elements.calendarApptDoctor.focus();
 }
@@ -6297,9 +6345,36 @@ function saveInstruction(e) {
         otherInstruction: elements.instructOtherType.value,
         transferHospital: elements.instructTransferHospital.value.trim(),
         selectedTests: selectedTests,
+        linkedLabIds: editId ? (instructions.find(i => i.id === editId)?.linkedLabIds || []) : [],
         createdTime: editId ? instructions.find(i => i.id === editId)?.createdTime : toLocalISOString(new Date()),
         editedTime: toLocalISOString(new Date())
     };
+
+    // Auto-link with Lab ID for "After Results" with Blood Test
+    if (instructionData.otherInstruction === 'After Results' && 
+        selectedTests.some(t => t === 'Blood Test' || t === 'C&S Results')) {
+        const patientLabs = labRecords.filter(lab => 
+            lab.patientId === patientId || 
+            (lab.patientName && lab.patientName.toLowerCase() === appt.patientName.toLowerCase())
+        );
+        
+        if (patientLabs.length > 0) {
+            // Sort by date descending and take the latest
+            const sortedLabs = [...patientLabs].sort((a, b) => {
+                const dateA = new Date(a.dateTime || a.date || 0);
+                const dateB = new Date(b.dateTime || b.date || 0);
+                return dateB - dateA;
+            });
+            const latestLab = sortedLabs[0];
+            const latestLabId = latestLab.labId || latestLab.id;
+            
+            if (latestLabId) {
+                console.log(`[Instruction] Auto-linking with latest lab: ${latestLabId}`);
+                instructionData.labTrackerId = latestLabId;
+                instructionData.linkedLabIds = [latestLabId];
+            }
+        }
+    }
 
     if (editId) {
         // Update existing instruction
@@ -6685,7 +6760,7 @@ function closeCategoryDetailsDialog() {
  * Open edit expense
  */
 function openEditExpense(expenseId) {
-    const exp = expenses.find(e => e.id === expenseId);
+    const exp = expenses.find(e => (e.id || e.ExpenseID || e.expense_id) === expenseId);
     if (!exp) {
         showNotification('Expense not found', 'error');
         return;
@@ -6701,12 +6776,12 @@ function openEditExpense(expenseId) {
  * Delete expense
  */
 async function deleteExpense(expenseId) {
-    const exp = expenses.find(e => e.id === expenseId);
+    const exp = expenses.find(e => (e.id || e.ExpenseID || e.expense_id) === expenseId);
     if (!exp) return;
 
     if (!confirm(`Are you sure you want to delete this expense?\n\nCategory: ${exp.category}\nAmount: ${formatCurrency(exp.amount)}`)) return;
 
-    const idx = expenses.findIndex(e => e.id === expenseId);
+    const idx = expenses.findIndex(e => (e.id || e.ExpenseID || e.expense_id) === expenseId);
     if (idx > -1) {
         // Remove from IndexedDB
         try {
@@ -6910,12 +6985,13 @@ function checkAndShowFollowUpAlerts() {
             );
 
             if (hasFollowUpInstruction) {
+                const timeline = lab.timeline || {};
                 alerts.push({
                     labId: lab.labId,
                     patientName: lab.patientName,
                     doctorName: lab.doctorName,
                     labName: lab.labName,
-                    resultDate: lab.timeline.completeResult
+                    resultDate: timeline.completeResult
                 });
             }
         }
@@ -7218,6 +7294,11 @@ function openInstructionFromPharmacist(appointmentId) {
     elements.instructCustomTest.value = '';
     elements.customTestGroup.classList.add('hidden');
 
+    // Reset test checkboxes
+    if (elements.testCheckboxes) {
+        elements.testCheckboxes.forEach(cb => cb.checked = false);
+    }
+
     // Populate doctor datalist
     elements.doctorDatalist.innerHTML = '';
     doctors.forEach(doc => {
@@ -7297,23 +7378,10 @@ function setupPharmacistCornerListeners() {
     window.addEventListener('expense-saved', (e) => {
         renderPharmacistCorner();
         
-        // Update expenses array and re-render Expenses tab
-        const expenseData = e.detail;
-        if (expenseData) {
-            const existingIdx = expenses.findIndex(exp => exp.id === expenseData.id);
-            if (existingIdx > -1) {
-                // Update existing expense
-                expenses[existingIdx] = { ...expenses[existingIdx], ...expenseData };
-            } else {
-                // Add new expense
-                expenses.push(expenseData);
-            }
-            
-            // Save and re-render
-            saveExpensesToStorage();
-            renderExpenses();
-            renderCategorySummary();
-        }
+        // DataLayer already handles updating the global expenses array.
+        // We just need to ensure the UI is refreshed.
+        renderExpenses();
+        renderCategorySummary();
     });
 }
 
@@ -7962,6 +8030,33 @@ function addLabLinkToCalendar(patientId, patientName, inputId) {
     // Add to linked labs
     window[storageKey].push(labId);
     
+    // Persist to instructions array and storage
+    if (typeof instructions !== 'undefined' && Array.isArray(instructions)) {
+        const patientInstructions = instructions.filter(inst => 
+            inst.patientId === patientId && inst.otherInstruction === 'After Results'
+        );
+        
+        if (patientInstructions.length > 0) {
+            // Sort by creation time descending to get the most recent "After Results" instruction
+            patientInstructions.sort((a, b) => {
+                const dateA = new Date(a.createdAt || a.createdTime || 0);
+                const dateB = new Date(b.createdAt || b.createdTime || 0);
+                return dateB - dateA;
+            });
+            
+            const targetInst = patientInstructions[0];
+            if (!targetInst.linkedLabIds) targetInst.linkedLabIds = [];
+            
+            if (!targetInst.linkedLabIds.includes(labId)) {
+                targetInst.linkedLabIds.push(labId);
+                
+                // Save to storage
+                saveInstructionsToStorage();
+                console.log(`[Calendar] Persisted Lab ID ${labId} to instruction ${targetInst.id}`);
+            }
+        }
+    }
+    
     // Clear input
     input.value = '';
 
@@ -8000,6 +8095,34 @@ function removeLabLinkFromCalendar(patientId, labId, listDivId) {
     const index = window[storageKey].indexOf(labId);
     if (index > -1) {
         window[storageKey].splice(index, 1);
+        
+        // Persist removal to instructions array and storage
+        if (typeof instructions !== 'undefined' && Array.isArray(instructions)) {
+            const patientInstructions = instructions.filter(inst => 
+                inst.patientId === patientId && inst.otherInstruction === 'After Results'
+            );
+            
+            if (patientInstructions.length > 0) {
+                // Sort by creation time descending to get the most recent "After Results" instruction
+                patientInstructions.sort((a, b) => {
+                    const dateA = new Date(a.createdAt || a.createdTime || 0);
+                    const dateB = new Date(b.createdAt || b.createdTime || 0);
+                    return dateB - dateA;
+                });
+                
+                const targetInst = patientInstructions[0];
+                if (targetInst.linkedLabIds) {
+                    const instIdx = targetInst.linkedLabIds.indexOf(labId);
+                    if (instIdx > -1) {
+                        targetInst.linkedLabIds.splice(instIdx, 1);
+                        
+                        // Save to storage
+                        saveInstructionsToStorage();
+                        console.log(`[Calendar] Persisted Lab ID ${labId} removal from instruction ${targetInst.id}`);
+                    }
+                }
+            }
+        }
         
         // Update the list
         const listDiv = document.getElementById(listDivId);
@@ -8327,32 +8450,48 @@ function createLabFromExpense(expenseData) {
 /**
  * Check for lab results ready but not received (for appointment warning)
  */
-function checkLabResultsForPatient(patientId) {
-    let pendingLabs = labRecords.filter(lab =>
-        lab.patientId === patientId &&
-        (lab.status === 'Complete Result Out' || lab.status === 'Partial Result Out')
-    );
+/**
+ * Check if patient has any ready lab results
+ * @param {string} patientId - Patient ID
+ * @param {string} patientName - Patient name (optional fallback)
+ * @returns {Array} - Array of pending lab records
+ */
+function checkLabResultsForPatient(patientId, patientName = null) {
+    if (!patientId && !patientName) return [];
     
-    // Fallback: if no labs found by ID, try matching all labs with pending status
-    // This helps when patientId might not be set correctly
-    if (pendingLabs.length === 0) {
-        pendingLabs = labRecords.filter(lab =>
-            lab.status === 'Complete Result Out' || lab.status === 'Partial Result Out'
-        );
-    }
+    const statusesToShow = [
+        'Complete Result Out',
+        'Partial Result Out',
+        'Inform to Doctor',
+        'Inform to Patient'
+    ];
     
-    return pendingLabs;
+    return labRecords.filter(lab => {
+        // Match by ID if both have IDs
+        const matchesId = patientId && lab.patientId && String(lab.patientId) === String(patientId);
+        
+        // Match by Name if ID is missing or if we want extra robustness
+        // (Only use name match if IDs don't match or are missing)
+        const matchesName = patientName && lab.patientName && 
+                          lab.patientName.toLowerCase().trim() === patientName.toLowerCase().trim();
+        
+        // Final match: prioritize ID, fallback to Name
+        const isSamePatient = matchesId || (!patientId && matchesName) || (!lab.patientId && matchesName);
+
+        return isSamePatient && statusesToShow.includes(lab.status);
+    });
 }
 
 /**
  * Display pending lab results warning in appointment form
  * Shows all pending results line by line for multiple lab IDs
+ * @param {string} patientId - Patient ID
+ * @param {string} patientName - Patient name (optional fallback)
  */
-function displayPendingLabResults(patientId) {
-    console.log('displayPendingLabResults called for patientId:', patientId);
-    console.log('Current labRecords count:', labRecords.length);
+function displayPendingLabResults(patientId, patientName = null) {
+    console.log('displayPendingLabResults called for patientId:', patientId, 'name:', patientName);
     
-    const pendingLabs = checkLabResultsForPatient(patientId);
+    const pendingLabs = checkLabResultsForPatient(patientId, patientName);
     console.log('Pending labs found:', pendingLabs.length, pendingLabs);
     
     if (pendingLabs && pendingLabs.length > 0) {
@@ -8361,7 +8500,9 @@ function displayPendingLabResults(patientId) {
         let warningHtml = '<div style="margin-bottom: 8px; font-weight: 500; color: #92400e;">Pending Lab Results:</div>';
         
         pendingLabs.forEach((lab, index) => {
-            const resultDate = lab.timeline.completeResult || lab.timeline.partialResult;
+            // Defensive checks for timeline
+            const timeline = lab.timeline || {};
+            const resultDate = timeline.completeResult || timeline.partialResult;
             const statusLabel = lab.status === 'Complete Result Out' ? 'Complete' : 'Partial';
             
             warningHtml += `
@@ -8409,12 +8550,13 @@ function checkFollowUpAfterResults() {
             );
 
             if (hasFollowUpInstruction) {
+                const timeline = lab.timeline || {};
                 alerts.push({
                     labId: lab.labId,
                     patientName: lab.patientName,
                     doctorName: lab.doctorName,
                     labName: lab.labName,
-                    resultDate: lab.timeline.completeResult
+                    resultDate: timeline.completeResult
                 });
             }
         }
@@ -8426,12 +8568,12 @@ function checkFollowUpAfterResults() {
 /**
  * Display pending lab results warning in calendar appointment form
  * @param {string} patientId - Patient ID to check
+ * @param {string} patientName - Patient name (optional fallback)
  */
-function displayCalendarPendingLabResults(patientId) {
-    console.log('[Calendar] displayPendingLabResults called for patientId:', patientId);
-    console.log('[Calendar] Current labRecords count:', labRecords.length);
+function displayCalendarPendingLabResults(patientId, patientName = null) {
+    console.log('[Calendar] displayPendingLabResults called for patientId:', patientId, 'name:', patientName);
 
-    const pendingLabs = checkLabResultsForPatient(patientId);
+    const pendingLabs = checkLabResultsForPatient(patientId, patientName);
     console.log('[Calendar] Pending labs found:', pendingLabs.length, pendingLabs);
 
     if (pendingLabs && pendingLabs.length > 0) {
@@ -8440,7 +8582,8 @@ function displayCalendarPendingLabResults(patientId) {
         let warningHtml = '<div style="margin-bottom: 8px; font-weight: 500; color: #92400e;">Pending Lab Results:</div>';
 
         pendingLabs.forEach((lab, index) => {
-            const resultDate = lab.timeline.completeResult || lab.timeline.partialResult;
+            const timeline = lab.timeline || {};
+            const resultDate = timeline.completeResult || timeline.partialResult;
             const statusLabel = lab.status === 'Complete Result Out' ? 'Complete' : 'Partial';
 
             warningHtml += `
@@ -8614,8 +8757,31 @@ async function loadCalendarData() {
 
     // Filter instructions for calendar display
     const validInstructions = instructions.filter(inst => {
-        // Exclude PRN and Transfer to Hospital
-        if (inst.otherInstruction === 'PRN' || inst.otherInstruction === 'Transfer to Hospital') {
+        const other = (inst.otherInstruction || '').trim();
+        const general = (inst.generalInstruction || '').trim();
+        const otherLower = other.toLowerCase();
+
+        // Exclude PRN and Transfer to Hospital (case-insensitive check for multiple variations)
+        // Check both otherInstruction and generalInstruction fields
+        const isExcluded = (str) => {
+            if (!str) return false;
+            const s = str.toLowerCase().trim();
+            return s === 'prn' || 
+                   s === 'p.r.n' || 
+                   s === 'p.r.n (as needed)' || 
+                   s === 'prn (as needed)' ||
+                   s === 'transfer to hospital' ||
+                   s === 'transfer' ||
+                   s.includes('transfer to hospital') ||
+                   s.includes('p.r.n') ||
+                   s.includes('as needed') ||
+                   s.includes('as-needed') ||
+                   s.includes('transfer to') ||
+                   // Also check for PRN as a word to avoid matching "spring"
+                   /\bprn\b/.test(s);
+        };
+
+        if (isExcluded(other) || isExcluded(general)) {
             return false;
         }
 
@@ -8679,18 +8845,28 @@ async function loadCalendarData() {
         calendarEvents[date][doctorName].patients.push({
             type: 'follow-up',
             patientName: patientDisplay,
-            instruction: inst
+            instruction: inst,
+            linkedLabIds: inst.linkedLabIds || []
         });
 
         calendarEvents[date][doctorName].types.add('follow-up');
 
-        // Add tests before visit (only blood tests, not imaging)
+        // Add tests before visit (only blood tests, not imaging) - Unless it's "Do Tests Before"
         if (inst.selectedTests && inst.selectedTests.length > 0) {
+            const isDoTestsBefore = (inst.otherInstruction || '').trim().toLowerCase() === 'do tests before';
             const hasBloodTests = inst.selectedTests.some(t => bloodTests.includes(t));
-            if (hasBloodTests) {
+            
+            if (isDoTestsBefore || hasBloodTests) {
                 calendarEvents[date][doctorName].types.add('tests-before');
                 const lastPatient = calendarEvents[date][doctorName].patients[calendarEvents[date][doctorName].patients.length - 1];
-                lastPatient.tests = inst.selectedTests.filter(t => bloodTests.includes(t));
+                
+                if (isDoTestsBefore) {
+                    // For "Do Tests Before", show all selected tests
+                    lastPatient.tests = inst.selectedTests;
+                } else {
+                    // For other types, still only show blood tests as follow-up annotations
+                    lastPatient.tests = inst.selectedTests.filter(t => bloodTests.includes(t));
+                }
             }
         }
     });
@@ -8800,7 +8976,7 @@ async function loadCalendarData() {
                 bloodTestStatus: bloodTestStatus,
                 appointmentDate: appointmentDate,
                 doctorName: doctorName,
-                linkedLabIds: [] // Array to store multiple linked lab IDs
+                linkedLabIds: inst.linkedLabIds || [] // Load linked lab IDs from instruction
             });
 
             calendarEvents[date][doctorName].types.add('pending');
@@ -8808,7 +8984,7 @@ async function loadCalendarData() {
     });
 
     // Generate TODO events for items without specific dates (appear on today's date)
-    generateTODOCalendarEvents(instructions, labRecords, calendarEvents, bloodTests, imagingTests);
+    generateTODOCalendarEvents(validInstructions, labRecords, calendarEvents, bloodTests, imagingTests);
 
     const eventDates = Object.keys(calendarEvents);
     console.log(`[Calendar] Generated events for ${eventDates.length} dates:`, eventDates);
@@ -8879,7 +9055,8 @@ function generateTODOCalendarEvents(instructions, labRecords, calendarEvents, bl
                 tests: testsToCheck,
                 appointmentDate: inst.appointmentDate || null,
                 isAfterResults: false,
-                hasResults: false
+                hasResults: false,
+                linkedLabIds: inst.linkedLabIds || []
             });
 
             calendarEvents[today][doctorName].types.add('todo');
@@ -9104,7 +9281,9 @@ function showCalendarEventDetail(event, date) {
 
                 // Show tests to check
                 if (patient.tests && patient.tests.length > 0) {
-                    html += `<div style="font-size: 0.85rem; color: #6b7280; margin-top: 4px;">🔬 Tests to Check: ${patient.tests.map(t => escapeHtml(t)).join(', ')}</div>`;
+                    const isDoTestsBefore = (patient.instruction?.otherInstruction || '').trim().toLowerCase() === 'do tests before';
+                    const testLabel = isDoTestsBefore ? '→ Tests:' : '🔬 Tests to Check:';
+                    html += `<div style="font-size: 0.85rem; color: #6b7280; margin-top: 4px;">${testLabel} ${patient.tests.map(t => escapeHtml(t)).join(', ')}</div>`;
                 }
 
                 html += `<div style="font-size: 0.75rem; color: #6b7280; margin-top: 6px; font-style: italic;">📌 This task appears daily until a date is specified or results are available</div>`;
@@ -9131,21 +9310,24 @@ function showCalendarEventDetail(event, date) {
                 const patientNameForLookup = patient.instruction?.patientName || '';
                 const storageKey = `calLinkedLabs_${patientId}`;
 
-                // Load from window storage if it exists, otherwise use patient.linkedLabIds
-                if (!window[storageKey]) {
-                    window[storageKey] = patient.linkedLabIds || [];
-                } else {
-                    // Sync back to patient object
-                    patient.linkedLabIds = window[storageKey];
-                }
+                // Always use patient.linkedLabIds (from database) as the source of truth when opening the dialog
+                window[storageKey] = [...(patient.linkedLabIds || [])];
 
                 // Auto-link all lab records for this patient that aren't already in the list
+                // (Optional: this ensures even labs created elsewhere are shown here)
                 const patientLabs = labRecords.filter(lab => lab.patientId === patientId);
+                let autoLinkedCount = 0;
                 patientLabs.forEach(lab => {
                     if (!window[storageKey].includes(lab.labId)) {
                         window[storageKey].push(lab.labId);
+                        autoLinkedCount++;
                     }
                 });
+                
+                // If we auto-linked new labs, update the patient object too
+                if (autoLinkedCount > 0) {
+                    patient.linkedLabIds = window[storageKey];
+                }
 
                 // Build a map of linked labs for quick lookup
                 const linkedLabsMap = {};
@@ -9330,8 +9512,33 @@ function showCustomDialog(title, content) {
 function populateCalendarDoctorFilter() {
     const doctors = new Set();
     
+    // Robust exclusion check matching the one in loadCalendarData
+    const isExcluded = (str) => {
+        if (!str) return false;
+        const s = str.toLowerCase().trim();
+        return s === 'prn' || 
+               s === 'p.r.n' || 
+               s === 'p.r.n (as needed)' || 
+               s === 'prn (as needed)' ||
+               s === 'transfer to hospital' ||
+               s === 'transfer' ||
+               s.includes('transfer to hospital') ||
+               s.includes('p.r.n') ||
+               s.includes('as needed') ||
+               s.includes('as-needed') ||
+               s.includes('transfer to') ||
+               // Also check for PRN as a word to avoid matching "spring"
+               /\bprn\b/.test(s);
+    };
+
     instructions.forEach(inst => {
-        if (inst.otherInstruction === 'PRN' || inst.otherInstruction === 'Transfer to Hospital') return;
+        const other = (inst.otherInstruction || '').trim();
+        const general = (inst.generalInstruction || '').trim();
+        
+        // Exclude PRN and Transfer to Hospital
+        if (isExcluded(other) || isExcluded(general)) {
+            return;
+        }
         const doctor = inst.followUpDoctor || inst.doctorName;
         if (doctor) doctors.add(doctor);
     });
@@ -9504,7 +9711,7 @@ async function applyCalendarFilters() {
  * Update calendar connection status
  */
 function updateCalendarConnectionStatus() {
-    const statusEl = document.getElementById('connectionStatus');
+    const statusEl = document.getElementById('calendarConnectionStatus');
     if (statusEl) {
         statusEl.className = `status-indicator ${navigator.onLine ? 'online' : 'offline'}`;
         statusEl.title = navigator.onLine ? 'Online' : 'Offline - Using cached data';
