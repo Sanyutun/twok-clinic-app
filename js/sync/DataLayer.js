@@ -122,54 +122,67 @@ class DataLayer {
             return;
         }
 
-        try {
-            console.log('[DataLayer] 🔄 Initializing...');
+        if (this.initializing) {
+            console.log('[DataLayer] Initialization already in progress, waiting...');
+            return this.initPromise;
+        }
 
-            // 1. Initialize IndexedDB - try to reuse existing TWOKDB if available
-            if (window.TWOKDB && typeof window.TWOKDB.openDB === 'function') {
-                console.log('[DataLayer] Attempting to reuse existing TWOKDB connection...');
-                try {
-                    this.db = await window.TWOKDB.openDB();
-                    console.log('[DataLayer] ✅ Connected to existing TWOKDB');
-                } catch (dbErr) {
-                    console.warn('[DataLayer] Could not reuse TWOKDB, opening new connection:', dbErr);
+        this.initializing = true;
+        this.initPromise = (async () => {
+            try {
+                console.log('[DataLayer] 🔄 Initializing...');
+
+                // 1. Initialize IndexedDB - try to reuse existing TWOKDB if available
+                if (window.TWOKDB && typeof window.TWOKDB.openDB === 'function') {
+                    console.log('[DataLayer] Attempting to reuse existing TWOKDB connection...');
+                    try {
+                        this.db = await window.TWOKDB.openDB();
+                        console.log('[DataLayer] ✅ Connected to existing TWOKDB');
+                    } catch (dbErr) {
+                        console.warn('[DataLayer] Could not reuse TWOKDB, opening new connection:', dbErr);
+                        await this.initIndexedDB();
+                    }
+                } else {
                     await this.initIndexedDB();
                 }
-            } else {
-                await this.initIndexedDB();
+
+                // 2. Initialize Supabase client if credentials provided
+                if (config.supabaseUrl && config.supabaseKey) {
+                    console.log('[DataLayer] Initializing Supabase client...');
+                    await window.SupabaseClient.init(config.supabaseUrl, config.supabaseKey);
+                    console.log('[DataLayer] ✅ Supabase client initialized');
+                }
+
+                // 3. Set API URL for sync
+                if (config.apiUrl) {
+                    window.TWOK_API_URL = config.apiUrl;
+                }
+
+                // 4. Load initial data from IndexedDB
+                console.log('[DataLayer] Loading local data into memory...');
+                await this.loadAllLocalData();
+
+                // 5. Setup realtime subscriptions if Supabase is available
+                if (window.SupabaseClient.initialized) {
+                    console.log('[DataLayer] Setting up realtime subscriptions...');
+                    await this.setupRealtimeSubscriptions();
+                }
+
+                this.initialized = true;
+                this.initializing = false;
+                console.log('[DataLayer] ✅ DataLayer fully initialized');
+
+                // Expose globally
+                window.DataLayer = this;
+            } catch (error) {
+                this.initializing = false;
+                this.initialized = false;
+                console.error('[DataLayer] ❌ Initialization failed:', error);
+                // Don't re-throw to allow app to continue in offline mode
             }
+        })();
 
-            // 2. Initialize Supabase client if credentials provided
-            if (config.supabaseUrl && config.supabaseKey) {
-                console.log('[DataLayer] Initializing Supabase client...');
-                await window.SupabaseClient.init(config.supabaseUrl, config.supabaseKey);
-                console.log('[DataLayer] ✅ Supabase client initialized');
-            }
-
-            // 3. Set API URL for sync
-            if (config.apiUrl) {
-                window.TWOK_API_URL = config.apiUrl;
-            }
-
-            // 4. Load initial data from IndexedDB
-            console.log('[DataLayer] Loading local data into memory...');
-            await this.loadAllLocalData();
-
-            // 5. Setup realtime subscriptions if Supabase is available
-            if (window.SupabaseClient.initialized) {
-                console.log('[DataLayer] Setting up realtime subscriptions...');
-                await this.setupRealtimeSubscriptions();
-            }
-
-            this.initialized = true;
-            console.log('[DataLayer] ✅ DataLayer fully initialized');
-
-            // Expose globally
-            window.DataLayer = this;
-        } catch (error) {
-            console.error('[DataLayer] ❌ Initialization failed:', error);
-            // Don't re-throw to allow app to continue in offline mode
-        }
+        return this.initPromise;
     }
 
     // ==========================================
@@ -1056,6 +1069,11 @@ class DataLayer {
      */
     async syncFromSupabase() {
         console.log('[DataLayer] Starting manual sync...');
+
+        if (!window.SupabaseClient || !window.SupabaseClient.initialized || !window.SupabaseClient.client) {
+            console.error('[DataLayer] Cannot sync: Supabase client is not initialized');
+            throw new Error('Supabase sync is currently unavailable. Please check your internet connection and reload the app.');
+        }
 
         try {
             // 1. Try to flush pending queue first

@@ -214,6 +214,7 @@ window.getSyncStatus()
 | "Supabase not initialized" | Check `sync-config.js` has correct URL/key |
 | "CORS error" | Verify `API_URL` matches backend |
 | "Data not syncing" | Check network, run `window.getSyncStatus()` |
+| "WebSocket failed" | 1. Ensure Realtime is enabled in Supabase for all tables. 2. Check if your network/firewall blocks `wss://` connections. 3. Verify you are using the `anon` key on the frontend. |
 | Console errors | Read error message, check guides |
 
 ## 📖 Full Guides

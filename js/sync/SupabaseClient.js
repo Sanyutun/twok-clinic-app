@@ -8,6 +8,8 @@ class SupabaseClient {
         this.client = null;
         this.subscriptions = new Map();
         this.initialized = false;
+        this.initializing = false;
+        this.initPromise = null;
     }
 
     /**
@@ -17,31 +19,57 @@ class SupabaseClient {
      */
     async init(url, key) {
         if (this.initialized) {
-            console.log('[SupabaseClient] Already initialized');
             return;
         }
 
-        try {
-            // Dynamically import Supabase JS client
-            const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
-            
-            this.client = createClient(url, key, {
-                auth: {
-                    persistSession: true,
-                    autoRefreshToken: true
-                },
-                realtime: {
-                    params: {
-                        eventsPerSecond: 10
-                    }
-                }
-            });
+        if (this.initializing) {
+            console.log('[SupabaseClient] Initialization already in progress, waiting...');
+            return this.initPromise;
+        }
 
-            this.initialized = true;
-            console.log('[SupabaseClient] ✅ Initialized');
-        } catch (error) {
-            console.error('[SupabaseClient] ❌ Failed to initialize:', error);
-            throw error;
+        this.initializing = true;
+        this.initPromise = (async () => {
+            try {
+                console.log('[SupabaseClient] Starting initialization...');
+                
+                if (!url || !key) {
+                    throw new Error('Supabase URL or Key is missing');
+                }
+
+                // Dynamically import Supabase JS client - Use a specific version for stability
+                const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/+esm');
+                
+                this.client = createClient(url, key, {
+                    auth: {
+                        persistSession: true,
+                        autoRefreshToken: true
+                    }
+                });
+
+                if (!this.client) {
+                    throw new Error('Failed to create Supabase client');
+                }
+
+                this.initialized = true;
+                this.initializing = false;
+                console.log('[SupabaseClient] ✅ Initialized successfully');
+            } catch (error) {
+                this.initializing = false;
+                this.initialized = false;
+                console.error('[SupabaseClient] ❌ Failed to initialize:', error);
+                throw error;
+            }
+        })();
+
+        return this.initPromise;
+    }
+
+    /**
+     * Internal helper to ensure client is ready
+     */
+    checkInitialized() {
+        if (!this.initialized || !this.client) {
+            throw new Error('Supabase client not initialized. Call init() first.');
         }
     }
 
@@ -56,6 +84,7 @@ class SupabaseClient {
      * @returns {Promise<Array>}
      */
     async getAll(table, options = {}) {
+        this.checkInitialized();
         const { orderBy = 'created_at', orderDir = 'asc', filters = [] } = options;
 
         let query = this.client.from(table).select('*');
@@ -83,6 +112,7 @@ class SupabaseClient {
      * @returns {Promise<Object>}
      */
     async getById(table, id) {
+        this.checkInitialized();
         const { data, error } = await this.client
             .from(table)
             .select('*')
@@ -100,6 +130,7 @@ class SupabaseClient {
      * @returns {Promise<Object>}
      */
     async insert(table, data) {
+        this.checkInitialized();
         const { data: result, error } = await this.client
             .from(table)
             .insert(data)
@@ -118,6 +149,7 @@ class SupabaseClient {
      * @returns {Promise<Object>}
      */
     async update(table, id, data) {
+        this.checkInitialized();
         const { data: result, error } = await this.client
             .from(table)
             .update(data)
@@ -136,6 +168,7 @@ class SupabaseClient {
      * @returns {Promise<boolean>}
      */
     async delete(table, id) {
+        this.checkInitialized();
         const { error } = await this.client
             .from(table)
             .delete()
@@ -152,6 +185,7 @@ class SupabaseClient {
      * @returns {Promise<Array>}
      */
     async bulkInsert(table, records) {
+        this.checkInitialized();
         const { data, error } = await this.client
             .from(table)
             .insert(records)
@@ -168,7 +202,9 @@ class SupabaseClient {
      * @param {Array<Object>} updates - Array of { id, ...data }
      */
     async bulkUpdate(table, idColumn, updates) {
+        this.checkInitialized();
         const results = [];
+        // ... rest of method ...
         
         for (const update of updates) {
             const { id, ...data } = update;
@@ -191,6 +227,7 @@ class SupabaseClient {
      * @returns {string} subscriptionId
      */
     async subscribe(table, callback, options = {}) {
+        this.checkInitialized();
         const { events = ['INSERT', 'UPDATE', 'DELETE'] } = options;
 
         const channelName = `${table}-${Date.now()}`;
@@ -212,13 +249,19 @@ class SupabaseClient {
             );
         });
 
-        const subscription = await channel.subscribe((status) => {
-            console.log(`[SupabaseClient] Subscription status for ${table}:`, status);
+        const subscription = await channel.subscribe((status, err) => {
+            if (status === 'SUBSCRIBED') {
+                console.log(`[SupabaseClient] ✅ Subscribed to ${table}`);
+            } else if (status === 'CHANNEL_ERROR') {
+                console.error(`[SupabaseClient] ❌ Channel error for ${table}:`, err);
+            } else if (status === 'TIMED_OUT') {
+                console.warn(`[SupabaseClient] ⚠️ Subscription timed out for ${table}`);
+            } else {
+                console.log(`[SupabaseClient] Subscription status for ${table}:`, status);
+            }
         });
 
         this.subscriptions.set(channelName, { channel, table, callback });
-        console.log(`[SupabaseClient] ✅ Subscribed to ${table}`);
-
         return channelName;
     }
 
@@ -227,6 +270,7 @@ class SupabaseClient {
      * @param {string} subscriptionId - Channel name
      */
     async unsubscribe(subscriptionId) {
+        this.checkInitialized();
         const subscription = this.subscriptions.get(subscriptionId);
         if (subscription) {
             await this.client.removeChannel(subscription.channel);
@@ -256,6 +300,7 @@ class SupabaseClient {
      * @returns {Promise<Array>}
      */
     async query(table, filters = {}) {
+        this.checkInitialized();
         let query = this.client.from(table).select('*');
 
         Object.entries(filters).forEach(([column, filter]) => {
@@ -288,6 +333,7 @@ class SupabaseClient {
      * @returns {Promise<number>}
      */
     async count(table, filters = {}) {
+        this.checkInitialized();
         let query = this.client.from(table).select('*', { count: 'exact', head: true });
 
         Object.entries(filters).forEach(([column, filter]) => {
@@ -309,6 +355,7 @@ class SupabaseClient {
      * @param {string} password 
      */
     async signIn(email, password) {
+        this.checkInitialized();
         const { data, error } = await this.client.auth.signInWithPassword({
             email,
             password
@@ -324,6 +371,7 @@ class SupabaseClient {
      * @param {string} password 
      */
     async signUp(email, password) {
+        this.checkInitialized();
         const { data, error } = await this.client.auth.signUp({
             email,
             password
@@ -337,6 +385,7 @@ class SupabaseClient {
      * Sign out
      */
     async signOut() {
+        this.checkInitialized();
         const { error } = await this.client.auth.signOut();
         if (error) throw error;
     }
@@ -346,6 +395,7 @@ class SupabaseClient {
      * @returns {Object|null}
      */
     getCurrentUser() {
+        if (!this.client) return null;
         return this.client.auth.getSession();
     }
 
