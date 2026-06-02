@@ -91,6 +91,17 @@ class TWOKSyncManager {
     }
 
     /**
+     * Check if a specific record is pending in the sync queue
+     */
+    isPending(table, id) {
+        return this.syncQueue.some(op => {
+            const opTable = this.mapTableToSupabase(op.table);
+            const targetTable = this.mapTableToSupabase(table);
+            return opTable === targetTable && op.id === id;
+        });
+    }
+
+    /**
      * Trigger sync process
      */
     async sync() {
@@ -113,7 +124,7 @@ class TWOKSyncManager {
     async pullAll() {
         if (!this.isOnline) {
             console.log('[SyncManager] Cannot pull all: Offline');
-            return;
+            throw new Error('You are currently offline. Please connect to the internet to sync.');
         }
 
         console.log('[SyncManager] Pulling all data from Supabase...');
@@ -135,6 +146,7 @@ class TWOKSyncManager {
                 window.showNotification('Pull failed: ' + error.message, 'error');
             }
             this.notifyListeners('sync_error', { error: error.message });
+            throw error;
         }
     }
 
@@ -142,18 +154,28 @@ class TWOKSyncManager {
      * Manual sync: Flushes the entire queue to Supabase
      */
     async flushQueue() {
-        if (this.isSyncing || this.syncQueue.length === 0) {
+        if (this.isSyncing) {
+            // Wait for current sync to finish if it's already in progress
+            let attempts = 0;
+            while (this.isSyncing && attempts < 10) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                attempts++;
+            }
+            if (this.isSyncing) return { synced: 0, error: 'Sync already in progress' };
+        }
+
+        if (this.syncQueue.length === 0) {
             return { synced: 0 };
         }
 
         if (!this.isOnline) {
             console.log('[SyncManager] Sync deferred: Offline');
-            return { synced: 0, offline: true };
+            throw new Error('Connection lost. Please check your internet connection and try again.');
         }
 
         // Only sync items that haven't failed too many times
-        // UNLESS this is a manual flush (e.g. from Sync button or pullAll)
-        const isManualTrigger = this.consecutiveFailures === 0;
+        // UNLESS this is a manual trigger (e.g. from Sync button or pullAll)
+        const isManualTrigger = this.consecutiveFailures === 0 || this.syncQueue.some(op => op.attempts === 0);
         const opsToSync = this.syncQueue.filter(op => isManualTrigger || op.attempts < this.MAX_RETRIES);
 
         if (opsToSync.length === 0) {

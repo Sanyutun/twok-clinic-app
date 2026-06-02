@@ -1094,9 +1094,11 @@ class DataLayer {
                 console.log(`[DataLayer] Syncing ${table}...`);
 
                 // A. Get all IDs from Supabase
+                // We use a high limit to avoid deleting local data due to pagination
                 const { data: allSupabaseRecords, error: fetchError } = await window.SupabaseClient.client
                     .from(table)
-                    .select('id');
+                    .select('id')
+                    .limit(5000);
 
                 if (fetchError) throw fetchError;
                 
@@ -1105,12 +1107,30 @@ class DataLayer {
                 // B. Get all IDs from local IndexedDB
                 const localRecords = await this.getAll(table);
                 
-                // C. Delete records that are NOT in Supabase
+                // C. Delete records that are NOT in Supabase AND NOT pending sync
+                let deleteCount = 0;
                 for (const localRecord of localRecords) {
-                    if (!supabaseIds.has(localRecord.id)) {
+                    const isPending = syncManager.isPending(table, localRecord.id);
+                    
+                    if (!supabaseIds.has(localRecord.id) && !isPending) {
+                        // Extra safety: Don't delete if we got 0 records from Supabase but have many locally
+                        // unless it's a table that's expected to be small/empty
+                        if (allSupabaseRecords.length === 0 && localRecords.length > 5 && 
+                            !['expense_categories', 'addresses', 'specialities', 'hospitals'].includes(table)) {
+                            console.warn(`[DataLayer] Suspicous: Supabase returned 0 records for ${table} but we have ${localRecords.length} locally. Skipping orphan deletion for safety.`);
+                            break;
+                        }
+
                         console.log(`[DataLayer] Deleting orphan record from ${table}: ${localRecord.id}`);
                         await this.delete(table, localRecord.id);
+                        deleteCount++;
+                    } else if (isPending) {
+                        console.log(`[DataLayer] Preserving local-only record (pending sync) in ${table}: ${localRecord.id}`);
                     }
+                }
+                
+                if (deleteCount > 0) {
+                    console.log(`[DataLayer] Cleaned up ${deleteCount} orphan records from ${table}`);
                 }
                 
                 // D. Fetch records that were updated since last sync
