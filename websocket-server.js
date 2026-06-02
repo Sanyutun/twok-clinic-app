@@ -1,184 +1,160 @@
 /**
- * WebSocket Server for TWOK Clinic Queue Display
- * Broadcasts real-time updates to connected TV displays
- * Also serves static files (index.html, tv-view.html, etc.)
- *
- * Usage: node websocket-server.js
- * Requires: npm install ws
+ * TWOK Clinic Unified Server
+ * Handles both Static Files, REST API, and WebSocket updates
  */
 
-const WebSocket = require('ws');
+const express = require('express');
+const cors = require('cors');
 const http = require('http');
-const fs = require('fs');
 const path = require('path');
+const { WebSocketServer } = require('ws');
+const { createClient } = require('@supabase/supabase-js');
+require('dotenv').config();
 
-const PORT = process.env.PORT || 3000; // Render provides PORT environment variable
-const BROADCAST_DELAY = 100; // ms delay before broadcasting to batch updates
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-// MIME types for serving static files
-const MIME_TYPES = {
-    '.html': 'text/html',
-    '.js': 'text/javascript',
-    '.css': 'text/css',
-    '.json': 'application/json',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.svg': 'image/svg+xml',
-    '.ico': 'image/x-icon'
-};
+// ==========================================
+// SUPABASE CLIENT
+// ==========================================
+const supabaseUrl = process.env.SUPABASE_URL || 'https://yinwoxljrfpqoibycqii.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlpbndveGxqcmZwcW9pYnljcWlpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjI0NDU4OSwiZXhwIjoyMDkxODIwNTg5fQ.5ZzszEM3ymglPSzhnKtc-Nxyy7oHk9IbsPL0WsW1s7Q';
 
-// Create HTTP server for serving static files
-const httpServer = http.createServer((req, res) => {
-    // Parse URL - remove query strings
-    let url = req.url.split('?')[0];
-    
-    // Default to index.html
-    if (url === '/') {
-        url = '/index.html';
-    }
-    
-    // Build file path
-    const filePath = path.join(__dirname, url);
-    const ext = path.extname(filePath);
-    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-    
-    // Read and serve file
-    fs.readFile(filePath, (err, content) => {
-        if (err) {
-            if (err.code === 'ENOENT') {
-                res.writeHead(404);
-                res.end('File not found: ' + url);
-            } else {
-                res.writeHead(500);
-                res.end('Server error: ' + err.code);
-            }
-        } else {
-            res.writeHead(200, { 'Content-Type': contentType });
-            res.end(content);
-        }
-    });
+if (!supabaseUrl || !supabaseKey) {
+    console.error('❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables');
+    // We don't exit here to allow static file serving even if DB is down
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+// ==========================================
+// MIDDLEWARE
+// ==========================================
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// Serve static files from current directory
+app.use(express.static(__dirname));
+
+// Root route for the frontend
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Create WebSocket server attached to HTTP server
-const wss = new WebSocket.Server({ server: httpServer });
+// ==========================================
+// HTTP SERVER + WEBSOCKET
+// ==========================================
+const server = http.createServer(app);
 
-// Connected clients
-const clients = new Set();
+// Initialize WebSocket Server
+const wss = new WebSocketServer({ server });
+console.log(`📡 WebSocket server sharing port ${PORT}`);
 
-// Debounce timer for batching updates
-let broadcastTimer = null;
+// WebSocket client tracking
+const wsClients = new Set();
 
-/**
- * Broadcast message to all connected clients
- * @param {Object} message - Message to broadcast
- */
-function broadcast(message) {
-    const data = JSON.stringify(message);
-    console.log(`Broadcasting: ${message.type}`);
-    
-    clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(data);
-        }
-    });
-}
-
-/**
- * Queue a broadcast with debouncing
- * @param {Object} message - Message to broadcast
- */
-function queueBroadcast(message) {
-    if (broadcastTimer) {
-        clearTimeout(broadcastTimer);
-    }
-    
-    broadcastTimer = setTimeout(() => {
-        broadcast(message);
-        broadcastTimer = null;
-    }, BROADCAST_DELAY);
-}
-
-/**
- * Handle new client connection
- */
 wss.on('connection', (ws) => {
-    console.log(`Client connected. Total clients: ${clients.size + 1}`);
-    clients.add(ws);
+    wsClients.add(ws);
+    console.log(`📡 WebSocket client connected. Total: ${wsClients.size}`);
     
-    // Send connection acknowledgment
     ws.send(JSON.stringify({
         type: 'connection_ack',
-        timestamp: new Date().toISOString(),
-        clientId: clients.size
+        timestamp: new Date().toISOString()
     }));
-    
-    // Handle incoming messages
+
     ws.on('message', (message) => {
         try {
-            const data = JSON.parse(message);
-            console.log('Received from client:', data);
+            const data = JSON.parse(message.toString());
             
             // Handle heartbeat
             if (data.type === 'heartbeat') {
-                // Respond with acknowledgment
-                ws.send(JSON.stringify({
-                    type: 'heartbeat_ack',
-                    timestamp: new Date().toISOString()
-                }));
+                ws.send(JSON.stringify({ type: 'heartbeat_ack' }));
+                return;
             }
-            
-            // Handle queue update requests from main app
-            if (data.type === 'queue_update' ||
-                data.type === 'appointment_status_changed' ||
-                data.type === 'patient_arrived' ||
-                data.type === 'consultation_started' ||
-                data.type === 'consultation_finished' ||
-                data.type === 'appointment_deleted' ||
-                data.type === 'appointment_created' ||
-                data.type === 'appointment_updated') {
-                // Broadcast to all connected TV displays with both client and server timestamps
-                queueBroadcast({
-                    type: data.type,
-                    data: data.data,
-                    clientTimestamp: data.timestamp,
-                    serverTimestamp: new Date().toISOString()
-                });
-            }
-            
+
+            // Broadcast to all clients
+            broadcast(data.type, data.data || data);
         } catch (error) {
-            console.error('Error parsing message:', error);
+            console.error('WebSocket message error:', error);
         }
     });
-    
-    // Handle client disconnect
+
     ws.on('close', () => {
-        clients.delete(ws);
-        console.log(`Client disconnected. Total clients: ${clients.size}`);
-    });
-    
-    // Handle errors
-    ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
-        clients.delete(ws);
+        wsClients.delete(ws);
+        console.log(`📡 WebSocket client disconnected. Total: ${wsClients.size}`);
     });
 });
 
-/**
- * Server error handling
- */
-wss.on('error', (error) => {
-    console.error('Server error:', error);
+// Broadcast helper
+function broadcast(type, data) {
+    const message = JSON.stringify({ type, data, timestamp: new Date().toISOString() });
+    wsClients.forEach(client => {
+        if (client.readyState === 1) {
+            client.send(message);
+        }
+    });
+}
+
+// ==========================================
+// REST API ROUTES
+// ==========================================
+
+// Health check
+app.get('/health', async (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        supabase: supabase ? 'initialized' : 'missing'
+    });
 });
 
-// Start the combined HTTP + WebSocket server
-httpServer.listen(PORT, () => {
-    console.log(`TWOK Clinic Server started:`);
-    console.log(`  - Main App: http://localhost:${PORT}/`);
-    console.log(`  - TV View:  http://localhost:${PORT}/tv-view.html`);
-    console.log(`  - WebSocket: ws://localhost:${PORT}/ws`);
-    console.log(`Waiting for connections...`);
+// Batch sync endpoint
+app.post('/api/sync', async (req, res) => {
+    try {
+        const { operations } = req.body;
+        if (!operations || !Array.isArray(operations)) {
+            return res.status(400).json({ error: 'Invalid operations format' });
+        }
+
+        console.log(`[Sync] 📥 Processing ${operations.length} operations`);
+        const results = [];
+
+        for (const op of operations) {
+            const { table, operation, data, id } = op;
+            let result;
+
+            try {
+                switch (operation) {
+                    case 'upsert':
+                        const upsertData = { ...data };
+                        if (id) upsertData.id = id;
+                        result = await supabase.from(table).upsert(upsertData).select();
+                        break;
+                    case 'delete':
+                        result = await supabase.from(table).delete().eq('id', id);
+                        break;
+                    default:
+                        console.warn(`[Sync] Unknown operation: ${operation}`);
+                }
+
+                if (result && result.error) throw result.error;
+                results.push({ success: true, table, id });
+            } catch (err) {
+                console.error(`[Sync] ❌ Failed op on ${table}:`, err.message);
+                results.push({ success: false, table, id, error: err.message });
+            }
+        }
+
+        broadcast('sync_completed', { count: operations.length });
+        res.json({ success: true, results });
+    } catch (error) {
+        console.error('[Sync] Global error:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
-// Note: The separate broadcast server has been removed for cloud deployment.
-// Use the WebSocket connection to send updates directly.
+// Start server
+server.listen(PORT, () => {
+    console.log(`✅ Unified Server running on port ${PORT}`);
+});
