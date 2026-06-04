@@ -905,8 +905,8 @@ class ExpenseFormComponent {
         // Validate amount
         const amount = parseFloat(amountValue);
 
-        if (isNaN(amount) || amount <= 0) {
-            this.showNotification('Please enter a valid positive amount', 'error');
+        if (isNaN(amount) || amount < 0) {
+            this.showNotification('Please enter a valid amount (0 or more)', 'error');
             return;
         }
 
@@ -955,7 +955,7 @@ class ExpenseFormComponent {
             }
 
             // If Lab expense, create or update lab tracker entry
-            if (expenseType === 'Lab') {
+            if (expenseType === 'Lab' || expenseType === 'Lab Test') {
                 console.log('[ExpenseForm] 🧪 Lab expense detected, creating/updating lab tracker entry...');
                 try {
                     const labData = this.prepareLabData(expenseData);

@@ -301,7 +301,8 @@ class SupabaseClient {
      */
     async query(table, filters = {}) {
         this.checkInitialized();
-        let query = this.client.from(table).select('*');
+        // Use a high limit to ensure we get all records for offline-first sync
+        let query = this.client.from(table).select('*').limit(5000);
 
         Object.entries(filters).forEach(([column, filter]) => {
             if (filter.operator === 'in') {

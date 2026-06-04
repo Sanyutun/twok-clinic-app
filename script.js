@@ -2765,16 +2765,24 @@ async function markAppointmentArrived(appointmentId) {
  * Get the current consulting number for a doctor
  */
 function getCurrentlyConsultingNumber(doctorName) {
+    const today = toLocalDateString(new Date());
+    
     const inConsult = appointments.find(a =>
-        a.doctorName === doctorName && a.status === 'In Consult'
+        a.doctorName === doctorName && 
+        a.status === 'In Consult' &&
+        (a.appointmentTime?.startsWith(today) || a.createdAt?.startsWith(today))
     );
     if (inConsult) {
         return parseInt(inConsult.bookingNumber, 10) || 0;
     }
 
-    // Find the highest booking number that has been Done
+    // Find the highest booking number that has been Done TODAY
     const doneAppointments = appointments
-        .filter(a => a.doctorName === doctorName && a.status === 'Done')
+        .filter(a => 
+            a.doctorName === doctorName && 
+            a.status === 'Done' &&
+            (a.appointmentTime?.startsWith(today) || a.createdAt?.startsWith(today))
+        )
         .map(a => parseInt(a.bookingNumber, 10) || 0);
 
     return doneAppointments.length > 0 ? Math.max(...doneAppointments) : 0;
@@ -7101,6 +7109,38 @@ function getAppointmentExpenseCount(appointmentId) {
 }
 
 /**
+ * Get lab records for an appointment
+ */
+function getAppointmentLabRecords(appointmentId) {
+    // 1. Direct link via appointment_id if present
+    let labs = labRecords.filter(lab => 
+        lab.appointment_id === appointmentId || 
+        lab.appointmentId === appointmentId
+    );
+    
+    if (labs.length > 0) return labs;
+
+    // 2. Link via expenses that are linked to this appointment
+    const appointmentExpenses = expenses.filter(exp => 
+        exp.appointment_id === appointmentId || exp.appointmentId === appointmentId
+    );
+    const expenseIds = appointmentExpenses.map(exp => exp.id);
+    
+    // 3. Link via instruction that has linkedLabIds
+    const instruction = instructions.find(inst => 
+        inst.appointment_id === appointmentId || inst.appointmentId === appointmentId
+    );
+    const linkedLabIds = instruction?.linkedLabIds || instruction?.linked_lab_ids || [];
+    
+    return labRecords.filter(lab => 
+        expenseIds.includes(lab.expenseId) || 
+        expenseIds.includes(lab.expense_id) ||
+        linkedLabIds.includes(lab.id) ||
+        linkedLabIds.includes(lab.labId)
+    );
+}
+
+/**
  * Render Pharmacist Corner
  */
 function renderPharmacistCorner() {
@@ -7133,7 +7173,8 @@ function renderPharmacistCorner() {
     elements.pharmacistTotalPatients.textContent = totalPatients;
     elements.pharmacistPendingCount.textContent = pendingCount;
     elements.pharmacistCompletedCount.textContent = completedCount;
-    elements.pharmacistQueuedCount.textContent = 0; // No sync queue
+    elements.pharmacistQueuedCount = elements.pharmacistQueuedCount || {textContent: '0'}; // Safety check
+    elements.pharmacistQueuedCount.textContent = 0;
 
     // Filter appointments based on search and filter
     let filteredAppointments = todayAppointments;
@@ -7186,6 +7227,8 @@ function renderPharmacistCorner() {
         const apptId = appt.id || appt.appointment_id;
         const hasInstruction = appointmentHasInstruction(apptId);
         const expenseCount = getAppointmentExpenseCount(apptId);
+        const apptLabs = getAppointmentLabRecords(apptId);
+        
         const isCompleted = hasInstruction;
         const statusClass = isCompleted ? 'completed' : 'pending';
         const statusLabel = isCompleted ? '✓ Completed' : '⏳ Pending';
@@ -7196,8 +7239,20 @@ function renderPharmacistCorner() {
         const bookingNumber = appt.booking_number || appt.bookingNumber || '-';
         const age = appt.age || appt.patient_age || appt.patientAge || '-';
 
+        let labStatusHtml = '❌ No Labs';
+        if (apptLabs.length > 0) {
+            const statuses = apptLabs.map(l => l.status);
+            if (statuses.every(s => s === 'complete')) {
+                labStatusHtml = `✅ ${apptLabs.length} Labs Ready`;
+            } else if (statuses.some(s => s === 'partial')) {
+                labStatusHtml = `⚠️ ${apptLabs.length} Labs Partial`;
+            } else {
+                labStatusHtml = `⏳ ${apptLabs.length} Labs Pending`;
+            }
+        }
+
         return `
-            <div class="pharmacist-card ${statusClass}" data-appointment-id="${appt.id || appt.appointment_id}">
+            <div class="pharmacist-card ${statusClass}" data-appointment-id="${apptId}">
                 <div class="pharmacist-card-header">
                     <div>
                         <div class="pharmacist-card-title">${escapeHtml(patientName)}</div>
@@ -7222,12 +7277,16 @@ function renderPharmacistCorner() {
                         <span class="pharmacist-info-label">Expense:</span>
                         <span class="pharmacist-info-value">${expenseCount > 0 ? `${expenseCount} recorded` : '❌ Not Recorded'}</span>
                     </div>
+                    <div class="pharmacist-info-row">
+                        <span class="pharmacist-info-label">Lab Records:</span>
+                        <span class="pharmacist-info-value">${labStatusHtml}</span>
+                    </div>
                 </div>
                 <div class="pharmacist-card-actions">
-                    <button type="button" class="btn btn-primary" onclick="openInstructionFromPharmacist('${appt.id || appt.appointment_id}')">
+                    <button type="button" class="btn btn-primary" onclick="openInstructionFromPharmacist('${apptId}')">
                         ${hasInstruction ? '✏️ Edit Instruction' : '📝 Instruction'}
                     </button>
-                    <button type="button" class="btn btn-secondary" onclick="openExpenseFromPharmacist('${appt.id || appt.appointment_id}')">
+                    <button type="button" class="btn btn-secondary" onclick="openExpenseFromPharmacist('${apptId}')">
                         ${expenseCount > 0 ? `💰 Add Expense (${expenseCount})` : '💰 Expense'}
                     </button>
                 </div>
@@ -7568,10 +7627,10 @@ function showLabDoctorAutocomplete(searchTerm) {
  * Edit lab record
  */
 function editLabRecord(labId) {
-    const lab = labRecords.find(l => l.labId === labId);
+    const lab = labRecords.find(l => (l.labId || l.id) === labId);
     if (!lab) return;
 
-    const index = labRecords.findIndex(l => l.labId === labId);
+    const index = labRecords.findIndex(l => (l.labId || l.id) === labId);
 
     elements.labEditIndex.value = index;
     elements.labId.value = lab.labId;
@@ -7607,12 +7666,12 @@ function editLabRecord(labId) {
  * Delete lab record
  */
 async function deleteLabRecord(labId) {
-    const lab = labRecords.find(l => l.labId === labId);
+    const lab = labRecords.find(l => (l.labId || l.id) === labId);
     if (!lab) return;
 
     if (!confirm(`Are you sure you want to delete lab record ${labId} for ${lab.patientName}?`)) return;
 
-    const index = labRecords.findIndex(l => l.labId === labId);
+    const index = labRecords.findIndex(l => (l.labId || l.id) === labId);
     if (index > -1) {
         labRecords.splice(index, 1);
         
@@ -7777,7 +7836,7 @@ function updateLabTimeline(timeline, status, dateTime) {
  * Show timeline dialog
  */
 function showTimeline(labId) {
-    const lab = labRecords.find(l => l.labId === labId);
+    const lab = labRecords.find(l => (l.labId || l.id) === labId);
     if (!lab) return;
 
     elements.timelinePatientInfo.innerHTML = `
@@ -7881,7 +7940,7 @@ function buildLinkedLabsListHTML(patientId, labIds) {
     `;
 
     labIds.forEach((labId, index) => {
-        const lab = labRecords.find(l => l.labId === labId);
+        const lab = labRecords.find(l => (l.labId || l.id) === labId);
         
         if (!lab) {
             html += `
@@ -7967,21 +8026,20 @@ function buildLinkedLabsListHTML(patientId, labIds) {
 /**
  * Add a lab link to calendar pending event
  * @param {string} patientId - Patient ID
- * @param {string} patientName - Patient name
  * @param {string} inputId - ID of the input field
  */
-function addLabLinkToCalendar(patientId, patientName, inputId) {
+function addLabLinkToCalendar(patientId, inputId) {
     const input = document.getElementById(inputId);
     const resultDiv = document.getElementById(inputId.replace('calLabIdInput_', 'calLabIdResult_'));
     const listDiv = document.getElementById(`calLinkedLabsList_${patientId}`);
-    
+
     if (!input || !resultDiv || !listDiv) {
         showNotification('Error: Input field not found', 'error');
         return;
     }
 
     const labId = input.value.trim();
-    
+
     if (!labId) {
         resultDiv.innerHTML = `
             <div style="padding: 8px; background-color: #fef2f2; border-radius: 6px; border-left: 3px solid #ef4444; font-size: 0.8rem; color: #991b1b;">
@@ -7991,9 +8049,12 @@ function addLabLinkToCalendar(patientId, patientName, inputId) {
         return;
     }
 
-    // Lookup the lab record
-    const lab = labRecords.find(l => l.labId === labId);
-    
+    // Lookup the lab record - Case-insensitive and support fallback to .id
+    const searchId = labId.toUpperCase();
+    const lab = labRecords.find(l => 
+        (l.labId || l.id || '').toString().toUpperCase() === searchId
+    );
+
     if (!lab) {
         resultDiv.innerHTML = `
             <div style="padding: 8px; background-color: #fef2f2; border-radius: 6px; border-left: 3px solid #ef4444; font-size: 0.8rem; color: #991b1b;">
@@ -8003,16 +8064,19 @@ function addLabLinkToCalendar(patientId, patientName, inputId) {
         return;
     }
 
+    // Real Lab ID to use (from record)
+    const actualLabId = lab.labId || lab.id;
+
     // Check if already linked
     const storageKey = `calLinkedLabs_${patientId}`;
     if (!window[storageKey]) {
         window[storageKey] = [];
     }
-    
-    if (window[storageKey].includes(labId)) {
+
+    if (window[storageKey].includes(actualLabId)) {
         resultDiv.innerHTML = `
             <div style="padding: 8px; background-color: #fffbeb; border-radius: 6px; border-left: 3px solid #f59e0b; font-size: 0.8rem; color: #92400e;">
-                ⚠️ Lab ID <strong>${escapeHtml(labId)}</strong> is already linked
+                ⚠️ Lab ID <strong>${escapeHtml(actualLabId)}</strong> is already linked
             </div>
         `;
         return;
@@ -8028,14 +8092,14 @@ function addLabLinkToCalendar(patientId, patientName, inputId) {
     }
 
     // Add to linked labs
-    window[storageKey].push(labId);
-    
+    window[storageKey].push(actualLabId);
+
     // Persist to instructions array and storage
     if (typeof instructions !== 'undefined' && Array.isArray(instructions)) {
         const patientInstructions = instructions.filter(inst => 
             inst.patientId === patientId && inst.otherInstruction === 'After Results'
         );
-        
+
         if (patientInstructions.length > 0) {
             // Sort by creation time descending to get the most recent "After Results" instruction
             patientInstructions.sort((a, b) => {
@@ -8043,20 +8107,20 @@ function addLabLinkToCalendar(patientId, patientName, inputId) {
                 const dateB = new Date(b.createdAt || b.createdTime || 0);
                 return dateB - dateA;
             });
-            
+
             const targetInst = patientInstructions[0];
             if (!targetInst.linkedLabIds) targetInst.linkedLabIds = [];
-            
-            if (!targetInst.linkedLabIds.includes(labId)) {
-                targetInst.linkedLabIds.push(labId);
-                
+
+            if (!targetInst.linkedLabIds.includes(actualLabId)) {
+                targetInst.linkedLabIds.push(actualLabId);
+
                 // Save to storage
                 saveInstructionsToStorage();
-                console.log(`[Calendar] Persisted Lab ID ${labId} to instruction ${targetInst.id}`);
+                console.log(`[Calendar] Persisted Lab ID ${actualLabId} to instruction ${targetInst.id}`);
             }
         }
     }
-    
+
     // Clear input
     input.value = '';
 
@@ -8064,7 +8128,7 @@ function addLabLinkToCalendar(patientId, patientName, inputId) {
     const testName = lab.testName || lab.labName;
     resultDiv.innerHTML = `
         <div style="padding: 8px; background-color: #f0fdf4; border-radius: 6px; border-left: 3px solid #10b981; font-size: 0.8rem; color: #166534;">
-            ✅ Linked lab <strong>${escapeHtml(testName)}</strong> (${escapeHtml(labId)}) added successfully!
+            ✅ Linked lab <strong>${escapeHtml(testName)}</strong> (${escapeHtml(actualLabId)}) added successfully!
         </div>
     `;
 
@@ -8161,7 +8225,7 @@ function lookupLabFromCalendar(patientId, patientName, inputId) {
     }
 
     // Lookup the lab record
-    const lab = labRecords.find(l => l.labId === labId);
+    const lab = labRecords.find(l => (l.labId || l.id) === labId);
     
     if (!lab) {
         resultDiv.innerHTML = `
@@ -9332,7 +9396,7 @@ function showCalendarEventDetail(event, date) {
                 // Build a map of linked labs for quick lookup
                 const linkedLabsMap = {};
                 window[storageKey].forEach(labId => {
-                    const lab = labRecords.find(l => l.labId === labId);
+                    const lab = labRecords.find(l => (l.labId || l.id) === labId);
                     if (lab) {
                         const testName = lab.testName || lab.labName;
                         if (!linkedLabsMap[testName]) {
@@ -9437,10 +9501,10 @@ function showCalendarEventDetail(event, date) {
                                 style="flex: 1; padding: 8px 12px; border: 2px solid #d1d5db; border-radius: 6px; font-size: 0.85rem; outline: none; transition: border-color 0.2s;"
                                 onfocus="this.style.borderColor='#3b82f6';"
                                 onblur="this.style.borderColor='#d1d5db';"
-                                onkeydown="if(event.key==='Enter'){event.preventDefault(); window.addLabLinkToCalendar('${patientId}', '${escapeHtml(patientNameForLookup)}', 'calLabIdInput_${patientId}');}"
+                                onkeydown="if(event.key==='Enter'){event.preventDefault(); window.addLabLinkToCalendar('${patientId}', 'calLabIdInput_${patientId}');}"
                             />
                             <button 
-                                onclick="window.addLabLinkToCalendar('${patientId}', '${escapeHtml(patientNameForLookup)}', 'calLabIdInput_${patientId}')" 
+                                onclick="window.addLabLinkToCalendar('${patientId}', 'calLabIdInput_${patientId}')" 
                                 style="padding: 8px 16px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; white-space: nowrap; transition: all 0.2s ease;"
                                 onmouseover="this.style.transform='translateY(-1px)';"
                                 onmouseout="this.style.transform='translateY(0)';"

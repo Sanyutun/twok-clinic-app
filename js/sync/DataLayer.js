@@ -43,7 +43,7 @@ class DataLayer {
                 'doctorName', 'appointmentDate', 'bookingNumber', 'generalInstruction', 
                 'returnDuration', 'returnUnit', 'nextAppointmentDate', 'followUpDoctor', 
                 'otherInstruction', 'transferHospital', 'selectedTests', 
-                'linkedLabIds', 'createdAt', 'createdTime', 'updatedAt', 'editedTime'
+                'linkedLabIds', 'labTrackerId', 'createdAt', 'createdTime', 'updatedAt', 'editedTime'
             ],
             'expenses': [
                 'id', 'amount', 'category', 'remark', 'patientId', 'patientName', 
@@ -52,9 +52,9 @@ class DataLayer {
                 'createdAt', 'createdTime', 'updatedAt', 'timestamp'
             ],
             'lab_records': [
-                'id', 'expenseId', 'patientId', 'patientName', 'doctorId', 'doctorName',
-                'labName', 'amount', 'status', 'dateTime', 'pendingTests',
-                'timeline', 'createdTime', 'createdAt', 'updatedAt'
+               'id', 'labId', 'appointmentId', 'appointment_id', 'expenseId', 'expense_id', 'patientId', 'patientName', 'doctorId', 'doctorName',
+               'labName', 'amount', 'status', 'dateTime', 'pendingTests',
+               'timeline', 'createdTime', 'createdAt', 'updatedAt', 'LabID'
             ],
             'expense_categories': [
                 'id', 'name', 'icon', 'createdAt', 'updatedAt'
@@ -103,6 +103,12 @@ class DataLayer {
             if (legacyId) {
                 sanitized.id = legacyId;
             }
+        }
+
+        // Special handling for lab_records: ensure both id and labId are present
+        if (storeName === 'lab_records') {
+            if (sanitized.id && !sanitized.labId) sanitized.labId = sanitized.id;
+            if (sanitized.labId && !sanitized.id) sanitized.id = sanitized.labId;
         }
         
         return sanitized;
@@ -435,7 +441,10 @@ class DataLayer {
                     : await this.getAll(col.store);
 
                 const rawRecords = data || [];
-                const records = rawRecords.map(r => this.flattenRecordIfNeeded(col.store, r));
+                const records = rawRecords.map(r => {
+                    const mapped = this.mapFromDb(col.store, r);
+                    return this.flattenRecordIfNeeded(col.store, mapped);
+                });
 
                 // Update global array in-place to maintain references in script.js
                 if (window[col.array] && Array.isArray(window[col.array])) {
@@ -519,9 +528,10 @@ class DataLayer {
             }
         }
 
-        // Special handling for lab_records: if id exists, populate labId for frontend compatibility
+        // Special handling for lab_records: if id exists, populate labId and LabID for frontend compatibility
         if (table === 'lab_records' && mapped.id) {
             mapped.labId = mapped.id;
+            mapped.LabID = mapped.id;
         }
 
         // Special handling for legacy field compatibility
@@ -544,7 +554,7 @@ class DataLayer {
         const mapped = { ...data };
 
         // Ensure foreign key fields are null if empty to avoid FK constraint violations
-        const fkFields = ['patientId', 'doctorId', 'appointmentId'];
+        const fkFields = ['patientId', 'doctorId', 'appointmentId', 'expenseId'];
         fkFields.forEach(field => {
             if (field in mapped && mapped[field] === '') {
                 mapped[field] = null;
@@ -605,10 +615,11 @@ class DataLayer {
                 'nextAppointmentDate': 'next_appointment_date',
                 'followUpDoctor': 'follow_up_doctor',
                 'otherInstruction': 'other_instruction',
-                'transferHospital': 'transfer_hospital',
+                'transfer_hospital': 'transfer_hospital',
                 'selectedTests': 'selected_tests',
-                'linkedLabIds': 'linked_lab_ids'
-            },
+                'linkedLabIds': 'linked_lab_ids',
+                'labTrackerId': 'lab_tracker_id'
+                },
             'expenses': {
                 'itemName': 'item_name',
                 'item_name': 'item_name',
@@ -620,6 +631,7 @@ class DataLayer {
                 'custom_icon': 'custom_icon'
             },
             'lab_records': {
+                'appointmentId': 'appointment_id',
                 'expenseId': 'expense_id',
                 'labName': 'lab_name',
                 'pendingTests': 'pending_tests'
@@ -657,10 +669,10 @@ class DataLayer {
             'is_next', 'penalty_turns', 'edited_time', 'date_time',
             'speciality', 'hospital', 'return_duration', 'return_unit',
             'next_appointment_date', 'follow_up_doctor', 'other_instruction',
-            'transfer_hospital', 'selected_tests', 'linked_lab_ids',
+            'transfer_hospital', 'selected_tests', 'linked_lab_ids', 'lab_tracker_id',
             'amount', 'category', 'remark', 'note', 'item_name',
             'expense_type', 'custom_type_name', 'custom_icon', 'appointment_id',
-            'lab_name', 'pending_tests', 'timeline', 'address', 'is_foc', 'value',
+            'expense_id', 'lab_name', 'pending_tests', 'timeline', 'address', 'is_foc', 'value',
             'icon', 'appointment_date', 'general_instruction'
         ];
 
