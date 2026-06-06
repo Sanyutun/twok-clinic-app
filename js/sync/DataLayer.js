@@ -1079,16 +1079,17 @@ class DataLayer {
     /**
      * Manual sync: Pull changes from Supabase AND push queued ops
      */
-    async syncFromSupabase() {
+    async syncFromSupabase(silent = false) {
         console.log('[DataLayer] Starting manual sync...');
 
         if (!window.SupabaseClient || !window.SupabaseClient.initialized || !window.SupabaseClient.client) {
             console.error('[DataLayer] Cannot sync: Supabase client is not initialized');
-            throw new Error('Supabase sync is currently unavailable. Please check your internet connection and reload the app.');
+            if (!silent) throw new Error('Supabase sync is currently unavailable. Please check your internet connection and reload the app.');
+            return;
         }
 
         try {
-            // 1. Try to flush pending queue first
+            // 1. Try to flush pending queue first (PUSH)
             const syncManager = window.twokSyncManager || window.SyncManager;
             if (syncManager && syncManager.getQueueLength() > 0) {
                 console.log(`[DataLayer] Pushing ${syncManager.getQueueLength()} pending operations...`);
@@ -1096,17 +1097,16 @@ class DataLayer {
                 console.log('[DataLayer] Pending operations pushed successfully');
             }
 
-            // 2. Fetch recent changes
+            // 2. Fetch recent changes (PULL)
             const tables = [
                 'patients', 'doctors', 'appointments', 'instructions', 'expenses', 
                 'lab_records', 'addresses', 'specialities', 'hospitals', 'expense_categories'
             ];
             
             for (const table of tables) {
-                console.log(`[DataLayer] Syncing ${table}...`);
+                if (!silent) console.log(`[DataLayer] Syncing ${table}...`);
 
                 // A. Get all IDs from Supabase
-                // We use a high limit to avoid deleting local data due to pagination
                 const { data: allSupabaseRecords, error: fetchError } = await window.SupabaseClient.client
                     .from(table)
                     .select('id')
@@ -1122,11 +1122,9 @@ class DataLayer {
                 // C. Delete records that are NOT in Supabase AND NOT pending sync
                 let deleteCount = 0;
                 for (const localRecord of localRecords) {
-                    const isPending = syncManager.isPending(table, localRecord.id);
+                    const isPending = syncManager && syncManager.isPending(table, localRecord.id);
                     
                     if (!supabaseIds.has(localRecord.id) && !isPending) {
-                        // Extra safety: Don't delete if we got 0 records from Supabase but have many locally
-                        // unless it's a table that's expected to be small/empty
                         if (allSupabaseRecords.length === 0 && localRecords.length > 5 && 
                             !['expense_categories', 'addresses', 'specialities', 'hospitals'].includes(table)) {
                             console.warn(`[DataLayer] Suspicous: Supabase returned 0 records for ${table} but we have ${localRecords.length} locally. Skipping orphan deletion for safety.`);
@@ -1136,18 +1134,15 @@ class DataLayer {
                         console.log(`[DataLayer] Deleting orphan record from ${table}: ${localRecord.id}`);
                         await this.delete(table, localRecord.id);
                         deleteCount++;
-                    } else if (isPending) {
-                        console.log(`[DataLayer] Preserving local-only record (pending sync) in ${table}: ${localRecord.id}`);
                     }
                 }
                 
-                if (deleteCount > 0) {
+                if (deleteCount > 0 && !silent) {
                     console.log(`[DataLayer] Cleaned up ${deleteCount} orphan records from ${table}`);
                 }
                 
                 // D. Fetch records that were updated since last sync
-                // FORCE full sync for lookup tables and records that often get missed
-                const forceFullSync = ['lab_records', 'expenses', 'addresses', 'specialities', 'hospitals', 'expense_categories'].includes(table);
+                const forceFullSync = ['addresses', 'specialities', 'hospitals', 'expense_categories'].includes(table);
                 const lastSync = forceFullSync ? null : localStorage.getItem(`last_sync_timestamp_${table}`);
                 
                 const queryOptions = lastSync ? {
@@ -1157,32 +1152,29 @@ class DataLayer {
                 const recentData = await window.SupabaseClient.query(table, queryOptions);
 
                 if (recentData && recentData.length > 0) {
-                    console.log(`[DataLayer] Found ${recentData.length} records for ${table}`);
+                    if (!silent) console.log(`[DataLayer] Found ${recentData.length} records for ${table}`);
                     
                     const localData = recentData.map(record => this.mapFromDb(table, record));
                     await this.bulkPut(table, localData);
-                    console.log(`[DataLayer] Updated ${table} in local IndexedDB`);
                     
-                    // Update sync timestamp for this table
+                    // Update sync timestamp
                     localStorage.setItem(`last_sync_timestamp_${table}`, new Date().toISOString());
                 } else if (!lastSync) {
-                    // Even if no updates found, set initial timestamp so next sync is incremental
                     localStorage.setItem(`last_sync_timestamp_${table}`, new Date().toISOString());
                 }
             }
 
-            showNotification('Sync complete! Refreshing page...', 'success');
+            // 3. REFRESH MEMORY ARRAYS (Very important to avoid page reload)
+            await this.loadAllLocalData();
+
+            if (!silent) showNotification('Sync complete!', 'success');
             
-            // Trigger global sync complete event
+            // 4. Trigger global sync complete event (UI components listen for this)
             window.dispatchEvent(new CustomEvent('twok_sync_complete'));
 
-            // Refresh the page after a short delay to allow the notification to be seen
-            setTimeout(() => {
-                window.location.reload();
-            }, 1500);
         } catch (error) {
             console.error('[DataLayer] Sync failed:', error);
-            showNotification('Sync error: ' + error.message, 'error');
+            if (!silent) showNotification('Sync error: ' + error.message, 'error');
             throw error;
         }
     }

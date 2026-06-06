@@ -52,10 +52,20 @@
 
                 switch (event) {
                     case 'sync_completed':
+                        // Re-render ALL tables to reflect pulled data
                         if (typeof window.renderAppointmentTable === 'function') window.renderAppointmentTable();
                         if (typeof window.renderExpenses === 'function') window.renderExpenses();
                         if (typeof window.renderInstructionTableWithSaved === 'function') window.renderInstructionTableWithSaved();
                         if (typeof window.renderLabTracker === 'function') window.renderLabTracker();
+                        if (typeof window.renderPatientTable === 'function') window.renderPatientTable();
+                        if (typeof window.renderDoctorTable === 'function') window.renderDoctorTable();
+                        if (typeof window.renderAddressList === 'function') window.renderAddressList();
+                        if (typeof window.renderSpecialityList === 'function') window.renderSpecialityList();
+                        if (typeof window.renderHospitalList === 'function') window.renderHospitalList();
+                        if (typeof window.renderCategorySummary === 'function') window.renderCategorySummary();
+                        if (typeof window.loadExpenseCategories === 'function') window.loadExpenseCategories();
+                        
+                        // Calendar View refresh
                         if (window.calendarViewApp && typeof window.calendarViewApp.refreshCalendar === 'function') {
                             window.calendarViewApp.refreshCalendar();
                         }

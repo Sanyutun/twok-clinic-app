@@ -11,10 +11,10 @@ class TWOKSyncManager {
         this.isSyncing = false;
         this.syncQueue = [];
         this.consecutiveFailures = 0;
-        this.currentInterval = 10000;
-        this.SYNC_INTERVAL = 30000; // Increase to 30s
+        this.currentInterval = 120000;
+        this.SYNC_INTERVAL = 120000; // 2 minutes
         this.MAX_RETRIES = 3; // Max immediate retries
-        this.MAX_INTERVAL = 300000; // 5 minutes max backoff
+        this.MAX_INTERVAL = 600000; // 10 minutes max backoff
         this.syncTimer = null;
         this.listeners = [];
 
@@ -121,10 +121,11 @@ class TWOKSyncManager {
     /**
      * Force a full data refresh from Supabase
      */
-    async pullAll() {
+    async pullAll(silent = false) {
         if (!this.isOnline) {
             console.log('[SyncManager] Cannot pull all: Offline');
-            throw new Error('You are currently offline. Please connect to the internet to sync.');
+            if (!silent) throw new Error('You are currently offline. Please connect to the internet to sync.');
+            return;
         }
 
         console.log('[SyncManager] Pulling all data from Supabase...');
@@ -136,17 +137,17 @@ class TWOKSyncManager {
             this.saveQueue();
 
             if (typeof window.DataLayer.syncFromSupabase === 'function') {
-                await window.DataLayer.syncFromSupabase();
+                await window.DataLayer.syncFromSupabase(silent);
                 console.log('[SyncManager] Full pull successful');
                 this.notifyListeners('sync_completed', { status: 'full_pull_complete' });
             }
         } catch (error) {
             console.error('[SyncManager] Full pull failed:', error);
-            if (window.showNotification) {
+            if (!silent && window.showNotification) {
                 window.showNotification('Pull failed: ' + error.message, 'error');
             }
             this.notifyListeners('sync_error', { error: error.message });
-            throw error;
+            if (!silent) throw error;
         }
     }
 
@@ -365,8 +366,9 @@ class TWOKSyncManager {
         }
 
         this.syncTimer = setInterval(() => {
-            if (this.isOnline && this.syncQueue.length > 0 && !this.isSyncing) {
-                this.sync();
+            if (this.isOnline && !this.isSyncing) {
+                // Bi-directional sync: pull updates from Supabase AND push queued changes
+                this.pullAll(true);
             }
         }, this.currentInterval);
 

@@ -554,7 +554,14 @@ const elements = {
     bookingEditorTableBody: document.getElementById('bookingEditorTableBody'),
     vipNumbersList: document.getElementById('vipNumbersList'),
     newVipNumber: document.getElementById('newVipNumber'),
-    addVipNumberBtn: document.getElementById('addVipNumberBtn')
+    addVipNumberBtn: document.getElementById('addVipNumberBtn'),
+
+    // Pagination Containers
+    patientPagination: document.getElementById('patientPagination'),
+    doctorPagination: document.getElementById('doctorPagination'),
+    appointmentPagination: document.getElementById('appointmentPagination'),
+    instructionPagination: document.getElementById('instructionPagination'),
+    labPagination: document.getElementById('labPagination')
 };
 
 // ==================== STATE ====================
@@ -569,6 +576,82 @@ let expenses = [];
 let expenseCategories = [];
 let labRecords = [];
 let labNames = ['TWOK', 'NN', 'YN', 'BH'];
+
+// Pagination State
+const ITEMS_PER_PAGE = 10;
+let patientCurrentPage = 1;
+let doctorCurrentPage = 1;
+let appointmentCurrentPage = 1;
+let instructionCurrentPage = 1;
+let labCurrentPage = 1;
+
+/**
+ * Generic Pagination UI Renderer
+ * @param {HTMLElement} container - The container to render pagination into
+ * @param {number} totalItems - Total number of items in the list
+ * @param {number} currentPage - The current active page
+ * @param {string} onPageChangeFuncName - Name of the global function to call when page changes
+ */
+function renderPagination(container, totalItems, currentPage, onPageChangeFuncName) {
+    if (!container) return;
+    
+    const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+    
+    if (totalPages <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+
+    let html = `
+        <button type="button" class="pagination-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="${onPageChangeFuncName}(${currentPage - 1})">
+            &laquo; Prev
+        </button>
+        <span class="pagination-info">Page ${currentPage} of ${totalPages}</span>
+        <button type="button" class="pagination-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="${onPageChangeFuncName}(${currentPage + 1})">
+            Next &raquo;
+        </button>
+    `;
+
+    container.innerHTML = html;
+}
+
+function changePatientPage(page) {
+    patientCurrentPage = page;
+    renderPatientTable();
+    // Scroll to top of table
+    elements.patientSection.scrollIntoView({ behavior: 'smooth' });
+}
+
+function changeDoctorPage(page) {
+    doctorCurrentPage = page;
+    renderDoctorTable();
+    elements.doctorSection.scrollIntoView({ behavior: 'smooth' });
+}
+
+function changeAppointmentPage(page) {
+    appointmentCurrentPage = page;
+    renderAppointmentTable();
+    elements.appointmentSection.scrollIntoView({ behavior: 'smooth' });
+}
+
+function changeInstructionPage(page) {
+    instructionCurrentPage = page;
+    renderInstructionTableWithSaved();
+    elements.instructionSection.scrollIntoView({ behavior: 'smooth' });
+}
+
+function changeLabPage(page) {
+    labCurrentPage = page;
+    renderLabTracker();
+    elements.labTrackerSection.scrollIntoView({ behavior: 'smooth' });
+}
+
+// Expose pagination functions globally
+window.changePatientPage = changePatientPage;
+window.changeDoctorPage = changeDoctorPage;
+window.changeAppointmentPage = changeAppointmentPage;
+window.changeInstructionPage = changeInstructionPage;
+window.changeLabPage = changeLabPage;
 
 // Load saved lab names from localStorage
 function loadLabNames() {
@@ -1438,13 +1521,28 @@ function renderPatientTable(filteredPatients = null) {
         elements.patientTableBody.innerHTML = '';
         elements.patientEmptyTableMessage.classList.remove('hidden');
         elements.patientTable.classList.add('hidden');
+        if (elements.patientPagination) elements.patientPagination.innerHTML = '';
         return;
     }
 
     elements.patientEmptyTableMessage.classList.add('hidden');
     elements.patientTable.classList.remove('hidden');
 
-    elements.patientTableBody.innerHTML = data.map(patient => `
+    // Pagination logic
+    const totalItems = data.length;
+    const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+    
+    // Ensure current page is within bounds
+    if (patientCurrentPage > totalPages && totalPages > 0) {
+        patientCurrentPage = totalPages;
+    } else if (patientCurrentPage < 1) {
+        patientCurrentPage = 1;
+    }
+
+    const startIndex = (patientCurrentPage - 1) * ITEMS_PER_PAGE;
+    const paginatedData = data.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+
+    elements.patientTableBody.innerHTML = paginatedData.map(patient => `
         <tr data-id="${patient.id}">
             <td>${escapeHtml(patient.id)}</td>
             <td>${escapeHtml(patient.name)}</td>
@@ -1470,6 +1568,8 @@ function renderPatientTable(filteredPatients = null) {
             }
         });
     });
+
+    renderPagination(elements.patientPagination, totalItems, patientCurrentPage, 'changePatientPage');
 }
 
 // ==================== DOCTOR TABLE ====================
@@ -1481,13 +1581,28 @@ function renderDoctorTable(filteredDoctors = null) {
         elements.doctorTableBody.innerHTML = '';
         elements.doctorEmptyTableMessage.classList.remove('hidden');
         elements.doctorTable.classList.add('hidden');
+        if (elements.doctorPagination) elements.doctorPagination.innerHTML = '';
         return;
     }
 
     elements.doctorEmptyTableMessage.classList.add('hidden');
     elements.doctorTable.classList.remove('hidden');
 
-    elements.doctorTableBody.innerHTML = data.map(doctor => `
+    // Pagination logic
+    const totalItems = data.length;
+    const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+    
+    // Ensure current page is within bounds
+    if (doctorCurrentPage > totalPages && totalPages > 0) {
+        doctorCurrentPage = totalPages;
+    } else if (doctorCurrentPage < 1) {
+        doctorCurrentPage = 1;
+    }
+
+    const startIndex = (doctorCurrentPage - 1) * ITEMS_PER_PAGE;
+    const paginatedData = data.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+
+    elements.doctorTableBody.innerHTML = paginatedData.map(doctor => `
         <tr data-id="${doctor.id}">
             <td>${escapeHtml(doctor.id)}</td>
             <td>${escapeHtml(doctor.name)}</td>
@@ -1510,6 +1625,8 @@ function renderDoctorTable(filteredDoctors = null) {
             }
         });
     });
+
+    renderPagination(elements.doctorPagination, totalItems, doctorCurrentPage, 'changeDoctorPage');
 }
 
 function sortDoctors(field) {
@@ -1544,6 +1661,7 @@ function sortDoctors(field) {
 // ==================== PATIENT CRUD ====================
 function searchPatients(searchTerm) {
     const term = searchTerm.toLowerCase().trim();
+    patientCurrentPage = 1;
     if (!term) {
         renderPatientTable();
         elements.patientNoResultsMessage.classList.add('hidden');
@@ -1852,6 +1970,7 @@ function clearPatientForm() {
 // ==================== DOCTOR CRUD ====================
 function searchDoctors(searchTerm) {
     const term = searchTerm.toLowerCase().trim();
+    doctorCurrentPage = 1;
     if (!term) {
         renderDoctorTable();
         elements.doctorNoResultsMessage.classList.add('hidden');
@@ -2271,9 +2390,15 @@ function getUsedNumbersForDate(doctorName, date, excludeAppointmentId = null) {
         .map(a => parseInt(a.bookingNumber, 10));
 }
 
-function calculateBookingNumber(doctorName, bookingType, appointmentDate, excludeAppointmentId = null) {
+function calculateBookingNumber(doctorName, bookingType, appointmentDate, excludeAppointmentId = null, status = null) {
     // Only assign booking numbers for target doctor
     if (doctorName !== TARGET_DOCTOR_NAME) {
+        return null;
+    }
+
+    // "Noted" status appointments for Dr. Soe Chan Myae do not get booking numbers
+    // They get converted to "Booked" automatically at 8AM the day before
+    if (status === 'Noted') {
         return null;
     }
 
@@ -2397,26 +2522,27 @@ function renderAppointmentTable(filteredAppointments = null) {
         // Apply date and doctor filters if they are set
         const dateFilter = elements.appointmentDateFilter.value;
         const doctorFilter = elements.appointmentDoctorFilter.value;
-        
+
         data = appointments;
-        
+
         // Filter by date if set
         if (dateFilter) {
             data = data.filter(a => a.appointmentTime && a.appointmentTime.startsWith(dateFilter));
         }
-        
+
         // Filter by doctor if set
         if (doctorFilter) {
             data = data.filter(a => a.doctorName === doctorFilter);
         }
     }
-    
+
     elements.appointmentCount.textContent = `${data.length} appointment${data.length !== 1 ? 's' : ''}`;
 
     if (data.length === 0) {
         elements.appointmentTableBody.innerHTML = '';
         elements.appointmentEmptyTableMessage.classList.remove('hidden');
         elements.appointmentTable.classList.add('hidden');
+        if (elements.appointmentPagination) elements.appointmentPagination.innerHTML = '';
         return;
     }
 
@@ -2428,37 +2554,51 @@ function renderAppointmentTable(filteredAppointments = null) {
         // Priority 1: Status priority (lower number = higher priority)
         const aPriority = STATUS_PRIORITY[a.status] || 99;
         const bPriority = STATUS_PRIORITY[b.status] || 99;
-        
+
         if (aPriority !== bPriority) {
             return aPriority - bPriority;
         }
-        
+
         // Priority 2: Penalty (patients without penalty first)
         const aHasPenalty = a.penaltyTurns && a.penaltyTurns > 0;
         const bHasPenalty = b.penaltyTurns && b.penaltyTurns > 0;
-        
+
         if (aHasPenalty && !bHasPenalty) return 1;
         if (!aHasPenalty && bHasPenalty) return -1;
-        
+
         // Priority 3: Booking number ascending
         if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
         if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
         return parseInt(a.bookingNumber, 10) - parseInt(b.bookingNumber, 10);
     });
 
-    elements.appointmentTableBody.innerHTML = sortedData.map(appt => {
+    // Pagination logic
+    const totalItems = sortedData.length;
+    const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+
+    // Ensure current page is within bounds
+    if (appointmentCurrentPage > totalPages && totalPages > 0) {
+        appointmentCurrentPage = totalPages;
+    } else if (appointmentCurrentPage < 1) {
+        appointmentCurrentPage = 1;
+    }
+
+    const startIndex = (appointmentCurrentPage - 1) * ITEMS_PER_PAGE;
+    const paginatedData = sortedData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+
+    elements.appointmentTableBody.innerHTML = paginatedData.map(appt => {
         const statusClass = getStatusClass(appt.status);
         const typeClass = getBookingTypeClass(appt.bookingType);
         const queueClass = getQueueNumberClass(appt.bookingType, appt.bookingNumber);
         const displayNumber = appt.bookingNumber !== null ? appt.bookingNumber : '-';
         const timeDisplay = appt.appointmentTime ? new Date(appt.appointmentTime).toLocaleString() : '-';
         const arrivalTimeDisplay = appt.arrivalTime ? formatDateTime(appt.arrivalTime) : '-';
-        
+
         // Get action button config
         const actionConfig = ACTION_BUTTON_MAP[appt.status] || ACTION_BUTTON_MAP['Noted'];
         const isCurrentlyConsulting = appt.status === 'In Consult';
         const rowClass = isCurrentlyConsulting ? 'current-patient' : '';
-        
+
         let actionButtonHtml = '';
         if (actionConfig.action) {
             actionButtonHtml = `<button type="button" class="action-btn ${actionConfig.class}" onclick="handleAppointmentAction(event, '${appt.id}')">${actionConfig.icon} ${actionConfig.label}</button>`;
@@ -2495,6 +2635,8 @@ function renderAppointmentTable(filteredAppointments = null) {
             }
         });
     });
+
+    renderPagination(elements.appointmentPagination, totalItems, appointmentCurrentPage, 'changeAppointmentPage');
 }
 
 // ==================== APPOINTMENT WORKFLOW ACTIONS ====================
@@ -3072,6 +3214,8 @@ function searchAppointments(searchTerm) {
     const dateFilter = elements.appointmentDateFilter.value;
     const doctorFilter = elements.appointmentDoctorFilter.value;
 
+    appointmentCurrentPage = 1;
+
     // If no filters are active, show all appointments
     if (!term && !dateFilter && !doctorFilter) {
         renderAppointmentTable();
@@ -3437,15 +3581,7 @@ function renderInstructionTableWithSaved() {
     // Filter by doctor
     if (doctorFilter) {
         console.log('[Instruction Filter] Applying doctor filter:', JSON.stringify(doctorFilter));
-        const beforeFilter = allAppointments.length;
-        allAppointments = allAppointments.filter(appt => {
-            const match = appt.doctorName === doctorFilter;
-            if (!match) {
-                console.log('[Instruction Filter] No match:', JSON.stringify(appt.doctorName), '!==', JSON.stringify(doctorFilter));
-            }
-            return match;
-        });
-        console.log('[Instruction Filter] After filter:', allAppointments.length, '(was', beforeFilter, ')');
+        allAppointments = allAppointments.filter(appt => appt.doctorName === doctorFilter);
     }
 
     // Sort by appointment date
@@ -3461,13 +3597,28 @@ function renderInstructionTableWithSaved() {
         elements.instructionTableBody.innerHTML = '';
         elements.instructionEmptyMessage.classList.remove('hidden');
         elements.instructionTable.classList.add('hidden');
+        if (elements.instructionPagination) elements.instructionPagination.innerHTML = '';
         return;
     }
 
     elements.instructionEmptyMessage.classList.add('hidden');
     elements.instructionTable.classList.remove('hidden');
 
-    elements.instructionTableBody.innerHTML = allAppointments.map(appt => {
+    // Pagination logic
+    const totalItems = allAppointments.length;
+    const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+    
+    // Ensure current page is within bounds
+    if (instructionCurrentPage > totalPages && totalPages > 0) {
+        instructionCurrentPage = totalPages;
+    } else if (instructionCurrentPage < 1) {
+        instructionCurrentPage = 1;
+    }
+
+    const startIndex = (instructionCurrentPage - 1) * ITEMS_PER_PAGE;
+    const paginatedData = allAppointments.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+
+    elements.instructionTableBody.innerHTML = paginatedData.map(appt => {
         const appointmentInstructions = instructions.filter(inst => inst.appointmentId === appt.id);
         const hasInstructions = appointmentInstructions.length > 0;
         
@@ -3547,6 +3698,8 @@ function renderInstructionTableWithSaved() {
             </tr>
         `;
     }).join('');
+
+    renderPagination(elements.instructionPagination, totalItems, instructionCurrentPage, 'changeInstructionPage');
 }
 
 /**
@@ -3948,9 +4101,10 @@ function selectPatient(patientId) {
         // Recalculate booking number for FOC
         const doctorName = elements.appointmentDoctor.value.trim();
         const dateTime = elements.appointmentDateTime.value;
+        const status = elements.appointmentStatus.value;
         if (doctorName && dateTime) {
             const appointmentDate = dateTime.split('T')[0];
-            const bookingNumber = calculateBookingNumber(doctorName, 'FOC', appointmentDate);
+            const bookingNumber = calculateBookingNumber(doctorName, 'FOC', appointmentDate, null, status);
             elements.appointmentBookingNumber.value = bookingNumber !== null ? bookingNumber : '';
         }
         // Show FOC indicator
@@ -4150,7 +4304,7 @@ async function saveAppointment(e) {
 
     // Calculate booking number (or use existing if editing)
     const excludeId = appointmentIsEditing ? elements.appointmentId.value : null;
-    let bookingNumber = calculateBookingNumber(doctorName, bookingType, appointmentDate, excludeId);
+    let bookingNumber = calculateBookingNumber(doctorName, bookingType, appointmentDate, excludeId, status);
 
     // If editing, keep existing booking number ONLY if same doctor, date, AND booking type
     if (appointmentIsEditing) {
@@ -4605,10 +4759,18 @@ window.createAppointmentFromCalendar = function(patientName, patientId, doctorNa
         // Pre-fill date/time
         if (calendarDate) {
             const defaultTime = '09:00';
-            elements.calendarApptDateTime.value = `${calendarDate}T${defaultTime}`;
+            const dateTimeValue = `${calendarDate}T${defaultTime}`;
+            elements.calendarApptDateTime.value = dateTimeValue;
+            
+            // Determine status for target doctor
+            let status = 'Booked';
+            if (doctorName === TARGET_DOCTOR_NAME) {
+                status = determineAppointmentStatus(doctorName, dateTimeValue);
+            }
+            elements.calendarApptStatus.value = status;
             
             if (doctorName) {
-                const bookingNumber = calculateBookingNumber(doctorName, 'Walk-in', calendarDate);
+                const bookingNumber = calculateBookingNumber(doctorName, 'Walk-in', calendarDate, null, status);
                 elements.calendarApptBookingNumber.value = bookingNumber !== null ? bookingNumber : '';
             }
         }
@@ -4706,10 +4868,11 @@ function recalculateCalendarBookingNumber() {
     const doctorName = elements.calendarApptDoctor.value.trim();
     const dateTime = elements.calendarApptDateTime.value;
     const bookingType = elements.calendarApptBookingType.value;
+    const status = elements.calendarApptStatus.value;
     
     if (doctorName && dateTime && bookingType) {
         const appointmentDate = dateTime.split('T')[0];
-        const bookingNumber = calculateBookingNumber(doctorName, bookingType, appointmentDate);
+        const bookingNumber = calculateBookingNumber(doctorName, bookingType, appointmentDate, null, status);
         elements.calendarApptBookingNumber.value = bookingNumber !== null ? bookingNumber : '';
     }
 }
@@ -5513,12 +5676,13 @@ function setupEventListeners() {
         const doctorName = elements.appointmentDoctor.value.trim();
         const bookingType = elements.appointmentBookingType.value;
         const dateTime = elements.appointmentDateTime.value;
+        const status = elements.appointmentStatus.value;
 
         if (doctorName && bookingType && dateTime) {
             const appointmentDate = dateTime.split('T')[0];
             // Exclude current appointment being edited
             const excludeId = appointmentIsEditing ? elements.appointmentId.value : null;
-            const bookingNumber = calculateBookingNumber(doctorName, bookingType, appointmentDate, excludeId);
+            const bookingNumber = calculateBookingNumber(doctorName, bookingType, appointmentDate, excludeId, status);
             elements.appointmentBookingNumber.value = bookingNumber !== null ? bookingNumber : '';
         }
     });
@@ -5528,6 +5692,7 @@ function setupEventListeners() {
         const doctorName = elements.appointmentDoctor.value.trim();
         const bookingType = elements.appointmentBookingType.value;
         const dateTime = elements.appointmentDateTime.value;
+        const status = elements.appointmentStatus.value;
 
         // Apply default time for Dr. Soe Chan Myae (force apply when doctor changes)
         applyDefaultTimeForSelectedDoctor(true);
@@ -5536,7 +5701,7 @@ function setupEventListeners() {
             const appointmentDate = dateTime.split('T')[0];
             // Exclude current appointment being edited
             const excludeId = appointmentIsEditing ? elements.appointmentId.value : null;
-            const bookingNumber = calculateBookingNumber(doctorName, bookingType, appointmentDate, excludeId);
+            const bookingNumber = calculateBookingNumber(doctorName, bookingType, appointmentDate, excludeId, status);
             elements.appointmentBookingNumber.value = bookingNumber !== null ? bookingNumber : '';
         }
     });
@@ -5578,12 +5743,20 @@ function setupEventListeners() {
 
         // Recalculate booking number
         const bookingType = elements.appointmentBookingType.value;
+        
+        // Update status based on doctor and date for target doctor
+        if (doctorName === TARGET_DOCTOR_NAME) {
+            const newStatus = determineAppointmentStatus(doctorName, dateTimeValue);
+            elements.appointmentStatus.value = newStatus;
+        }
+        
+        const status = elements.appointmentStatus.value;
 
         if (doctorName && bookingType && dateTimeValue) {
             const appointmentDate = dateTimeValue.split('T')[0];
             // Exclude current appointment being edited
             const excludeId = appointmentIsEditing ? elements.appointmentId.value : null;
-            const bookingNumber = calculateBookingNumber(doctorName, bookingType, appointmentDate, excludeId);
+            const bookingNumber = calculateBookingNumber(doctorName, bookingType, appointmentDate, excludeId, status);
             elements.appointmentBookingNumber.value = bookingNumber !== null ? bookingNumber : '';
         }
     });
@@ -5593,9 +5766,20 @@ function setupEventListeners() {
         applyDefaultTimeForSelectedDoctor(true);
     });
 
-    // Status change - update timestamp
+    // Status change - recalculate booking number
     elements.appointmentStatus.addEventListener('change', () => {
-        // Timestamps are updated on save
+        const doctorName = elements.appointmentDoctor.value.trim();
+        const bookingType = elements.appointmentBookingType.value;
+        const dateTime = elements.appointmentDateTime.value;
+        const status = elements.appointmentStatus.value;
+
+        if (doctorName && bookingType && dateTime) {
+            const appointmentDate = dateTime.split('T')[0];
+            // Exclude current appointment being edited
+            const excludeId = appointmentIsEditing ? elements.appointmentId.value : null;
+            const bookingNumber = calculateBookingNumber(doctorName, bookingType, appointmentDate, excludeId, status);
+            elements.appointmentBookingNumber.value = bookingNumber !== null ? bookingNumber : '';
+        }
     });
 
     // Appointment table sorting
@@ -5741,9 +5925,18 @@ function setupEventListeners() {
     elements.instructDeleteBtn.addEventListener('click', deleteInstruction);
 
     // Instruction table search and filters
-    elements.instructionSearchInput.addEventListener('input', () => renderInstructionTableWithSaved());
-    elements.instructionDoctorFilter.addEventListener('change', () => renderInstructionTableWithSaved());
-    elements.instructionSortFilter.addEventListener('change', () => renderInstructionTableWithSaved());
+    elements.instructionSearchInput.addEventListener('input', () => {
+        instructionCurrentPage = 1;
+        renderInstructionTableWithSaved();
+    });
+    elements.instructionDoctorFilter.addEventListener('change', () => {
+        instructionCurrentPage = 1;
+        renderInstructionTableWithSaved();
+    });
+    elements.instructionSortFilter.addEventListener('change', () => {
+        instructionCurrentPage = 1;
+        renderInstructionTableWithSaved();
+    });
 
     // ==================== EXPENSE EVENT LISTENERS ====================
 
@@ -6379,7 +6572,11 @@ function saveInstruction(e) {
             if (latestLabId) {
                 console.log(`[Instruction] Auto-linking with latest lab: ${latestLabId}`);
                 instructionData.labTrackerId = latestLabId;
-                instructionData.linkedLabIds = [latestLabId];
+                // Ensure linkedLabIds is an array and contains the latest lab ID
+                if (!instructionData.linkedLabIds) instructionData.linkedLabIds = [];
+                if (!instructionData.linkedLabIds.includes(latestLabId)) {
+                    instructionData.linkedLabIds.push(latestLabId);
+                }
             }
         }
     }
@@ -6931,6 +7128,7 @@ function renderLabTracker(filteredLabs = null) {
         elements.labTrackerTableBody.innerHTML = '';
         elements.labEmptyMessage.classList.remove('hidden');
         elements.labTrackerTable.classList.add('hidden');
+        if (elements.labPagination) elements.labPagination.innerHTML = '';
         return;
     }
 
@@ -6944,7 +7142,21 @@ function renderLabTracker(filteredLabs = null) {
         return bTime - aTime;
     });
 
-    elements.labTrackerTableBody.innerHTML = sortedData.map(lab => {
+    // Pagination logic
+    const totalItems = sortedData.length;
+    const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+    
+    // Ensure current page is within bounds
+    if (labCurrentPage > totalPages && totalPages > 0) {
+        labCurrentPage = totalPages;
+    } else if (labCurrentPage < 1) {
+        labCurrentPage = 1;
+    }
+
+    const startIndex = (labCurrentPage - 1) * ITEMS_PER_PAGE;
+    const paginatedData = sortedData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+
+    elements.labTrackerTableBody.innerHTML = paginatedData.map(lab => {
         // Check if this lab has a follow-up instruction
         const hasFollowUp = instructions.some(inst => 
             inst.patientId === lab.patientId && 
@@ -6973,6 +7185,8 @@ function renderLabTracker(filteredLabs = null) {
             </tr>
         `;
     }).join('');
+
+    renderPagination(elements.labPagination, totalItems, labCurrentPage, 'changeLabPage');
 
     // Check for follow-up alerts when rendering
     // checkAndShowFollowUpAlerts(); // Disabled - alerts handled by calendar view
@@ -7041,6 +7255,8 @@ function filterLabTracker() {
     const statusFilter = elements.labFilterStatus.value;
     const labFilter = elements.labFilterLab.value;
     const dateFilter = elements.labFilterDate.value;
+
+    labCurrentPage = 1;
 
     let filtered = [...labRecords];
 
@@ -8065,7 +8281,7 @@ function addLabLinkToCalendar(patientId, inputId) {
     }
 
     // Real Lab ID to use (from record)
-    const actualLabId = lab.labId || lab.id;
+    const actualLabId = lab.id || lab.labId;
 
     // Check if already linked
     const storageKey = `calLinkedLabs_${patientId}`;
@@ -8815,6 +9031,8 @@ async function loadCalendarData() {
     console.log('[Calendar] Total instructions:', instructions.length);
     console.log('[Calendar] Total lab records:', labRecords.length);
 
+    const today = new Date().toISOString().split('T')[0];
+
     // Define test type categories
     const bloodTests = ['Blood Test', 'C&S Results'];
     const imagingTests = ['USG', 'Echo', 'ECG', 'Xray', 'CT', 'MRI', 'Other'];
@@ -8989,12 +9207,8 @@ async function loadCalendarData() {
             }
         });
 
-        // Use today's date or the latest lab date for the pending notification
-        const latestLabDate = patientLabs.length > 0 ? patientLabs.sort((a, b) =>
-            new Date(b.dateTime) - new Date(a.dateTime)
-        )[0].dateTime.split('T')[0] : new Date().toISOString().split('T')[0];
-
-        const date = latestLabDate;
+        // "After Results" instructions should always appear on "today" until they are completed or handled
+        const date = today;
         const doctorName = inst.followUpDoctor || inst.doctorName || 'Unknown Doctor';
 
         if (!calendarEvents[date]) {
@@ -9376,22 +9590,6 @@ function showCalendarEventDetail(event, date) {
 
                 // Always use patient.linkedLabIds (from database) as the source of truth when opening the dialog
                 window[storageKey] = [...(patient.linkedLabIds || [])];
-
-                // Auto-link all lab records for this patient that aren't already in the list
-                // (Optional: this ensures even labs created elsewhere are shown here)
-                const patientLabs = labRecords.filter(lab => lab.patientId === patientId);
-                let autoLinkedCount = 0;
-                patientLabs.forEach(lab => {
-                    if (!window[storageKey].includes(lab.labId)) {
-                        window[storageKey].push(lab.labId);
-                        autoLinkedCount++;
-                    }
-                });
-                
-                // If we auto-linked new labs, update the patient object too
-                if (autoLinkedCount > 0) {
-                    patient.linkedLabIds = window[storageKey];
-                }
 
                 // Build a map of linked labs for quick lookup
                 const linkedLabsMap = {};

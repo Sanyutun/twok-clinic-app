@@ -19,8 +19,8 @@ window.TWOK_CONFIG = {
 
     // Sync Settings
     SYNC: {
-        // Auto-sync interval in milliseconds (5 seconds)
-        INTERVAL: 5000,
+        // Auto-sync interval in milliseconds (2 minutes)
+        INTERVAL: 120000,
         
         // Enable realtime subscriptions
         REALTIME: true,

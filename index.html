@@ -91,6 +91,7 @@
                         </button>
                     </div>
                 </div>
+                <div id="patientPagination" class="pagination-container"></div>
             </section>
 
             <!-- Address Management Modal -->
@@ -177,6 +178,7 @@
                         </button>
                     </div>
                 </div>
+                <div id="doctorPagination" class="pagination-container"></div>
             </section>
 
             <!-- Bottom Sheet Modal for Doctor Form -->
@@ -700,6 +702,7 @@
                     </button>
                 </div>
             </div>
+            <div id="appointmentPagination" class="pagination-container"></div>
         </section>
 
         <!-- Bottom Sheet Modal for Appointment Form -->
@@ -1012,6 +1015,7 @@
                     <p style="font-size: 0.9rem; color: var(--text-secondary);">Patients will appear here after their appointment status is set to "Done" or "Postpone".</p>
                 </div>
             </div>
+            <div id="instructionPagination" class="pagination-container"></div>
         </section>
     </section>
 
@@ -1689,6 +1693,7 @@
                     <p style="font-size: 0.9rem; color: var(--text-secondary);">Lab records are created automatically when adding Lab expenses, or manually using the "Add Lab Tracker" button.</p>
                 </div>
             </div>
+            <div id="labPagination" class="pagination-container"></div>
         </section>
     </section>
 
@@ -1894,7 +1899,7 @@
                         </div>
                         <div class="form-group">
                             <label for="labAmount">Amount <span class="required">*</span></label>
-                            <input type="number" id="labAmount" class="form-control" placeholder="e.g., 5000" min="1" required>
+                            <input type="number" id="labAmount" class="form-control" placeholder="e.g., 5000" min="0" required>
                         </div>
                     </div>
 

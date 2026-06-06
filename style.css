@@ -314,6 +314,7 @@ textarea.form-control {
 
 /* Modal Styles */
 .modal {
+    display: none;
     position: fixed;
     top: 0;
     left: 0;
@@ -323,9 +324,8 @@ textarea.form-control {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1200; /* Higher than patient form (1100) to appear on top */
+    z-index: 3200; /* Higher than calendar dialog (2000) */
 }
-
 .modal.hidden {
     display: none;
 }
@@ -751,13 +751,13 @@ tbody tr.highlighted {
     bottom: 0;
     left: 0;
     width: 100%;
-    z-index: 1000;
+    z-index: 3000; /* Higher than calendar dialog (2000) */
     display: block;
 }
 
 /* Patient form appears above other modals */
 #patientFormModal {
-    z-index: 1100;
+    z-index: 3100;
 }
 
 .bottom-sheet.hidden {
@@ -1997,7 +1997,68 @@ tbody tr.highlighted {
     color: #047857;
 }
 
-.queue-number-zero {
+/* Pagination Styles */
+.pagination-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    margin-top: 20px;
+    padding: 10px;
+}
+
+.pagination-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border-color);
+    background-color: white;
+    cursor: pointer;
+    border-radius: var(--radius);
+    transition: all 0.2s;
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pagination-btn:hover:not(:disabled) {
+    background-color: #f3f4f6;
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.pagination-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.pagination-info {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.pagination-page-btn {
+    font-weight: 500;
+}
+
+.pagination-page-btn.active {
+    background-color: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+@media (max-width: 480px) {
+    .pagination-container {
+        gap: 5px;
+        flex-wrap: wrap;
+    }
+    
+    .pagination-btn {
+        min-width: 40px;
+        padding: 5px 8px;
+    }
+}
+
     background-color: #fee2e2;
     color: #b91c1c;
 }
