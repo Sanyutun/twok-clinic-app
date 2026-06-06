@@ -1667,12 +1667,17 @@ function searchPatients(searchTerm) {
         elements.patientNoResultsMessage.classList.add('hidden');
         return;
     }
-    const filtered = patients.filter(p =>
-        p.name.toLowerCase().includes(term) ||
-        p.age.toLowerCase().includes(term) ||
-        p.phone.includes(term) ||
-        p.address.toLowerCase().includes(term)
-    );
+    const filtered = patients.filter(p => {
+        const name = (p.name || '').toLowerCase();
+        const age = String(p.age || '').toLowerCase();
+        const phone = (p.phone || '').toLowerCase();
+        const address = (p.address || '').toLowerCase();
+        
+        return name.includes(term) || 
+               age.includes(term) || 
+               phone.includes(term) || 
+               address.includes(term);
+    });
     renderPatientTable(filtered);
     elements.patientNoResultsMessage.classList.toggle('hidden', filtered.length > 0);
 }
@@ -1976,12 +1981,17 @@ function searchDoctors(searchTerm) {
         elements.doctorNoResultsMessage.classList.add('hidden');
         return;
     }
-    const filtered = doctors.filter(d =>
-        d.name.toLowerCase().includes(term) ||
-        d.speciality.toLowerCase().includes(term) ||
-        d.hospital.toLowerCase().includes(term) ||
-        d.phone.includes(term)
-    );
+    const filtered = doctors.filter(d => {
+        const name = (d.name || '').toLowerCase();
+        const speciality = (d.speciality || '').toLowerCase();
+        const hospital = (d.hospital || '').toLowerCase();
+        const phone = (d.phone || '').toLowerCase();
+        
+        return name.includes(term) || 
+               speciality.includes(term) || 
+               hospital.includes(term) || 
+               phone.includes(term);
+    });
     renderDoctorTable(filtered);
     elements.doctorNoResultsMessage.classList.toggle('hidden', filtered.length > 0);
 }
@@ -3227,11 +3237,12 @@ function searchAppointments(searchTerm) {
 
     // Filter by search term
     if (term) {
-        filtered = filtered.filter(a =>
-            a.patientName.toLowerCase().includes(term) ||
-            a.doctorName.toLowerCase().includes(term) ||
-            (a.phone && a.phone.includes(term))
-        );
+        filtered = filtered.filter(a => {
+            const pName = (a.patientName || '').toLowerCase();
+            const dName = (a.doctorName || '').toLowerCase();
+            const phone = (a.phone || '').toLowerCase();
+            return pName.includes(term) || dName.includes(term) || phone.includes(term);
+        });
     }
 
     // Filter by date
@@ -3574,7 +3585,7 @@ function renderInstructionTableWithSaved() {
     // Filter by search
     if (searchTerm) {
         allAppointments = allAppointments.filter(appt =>
-            appt.patientName.toLowerCase().includes(searchTerm)
+            (appt.patientName || '').toLowerCase().includes(searchTerm)
         );
     }
 
@@ -4048,7 +4059,7 @@ function showPatientAutocomplete(searchTerm) {
     }
 
     const term = searchTerm.toLowerCase();
-    const matches = patients.filter(p => p.name.toLowerCase().includes(term)).slice(0, 10);
+    const matches = patients.filter(p => (p.name || '').toLowerCase().includes(term)).slice(0, 10);
 
     if (matches.length === 0) {
         elements.patientAutocomplete.innerHTML = `
@@ -4129,7 +4140,7 @@ function showDoctorAutocomplete(searchTerm) {
     }
 
     const term = searchTerm.toLowerCase();
-    const matches = doctors.filter(d => d.name.toLowerCase().includes(term)).slice(0, 10);
+    const matches = doctors.filter(d => (d.name || '').toLowerCase().includes(term)).slice(0, 10);
 
     if (matches.length === 0) {
         elements.doctorAutocomplete.innerHTML = `
@@ -5011,7 +5022,7 @@ function showCalendarPatientAutocomplete(searchTerm) {
     }
 
     const term = searchTerm.toLowerCase();
-    const matches = patients.filter(p => p.name.toLowerCase().includes(term)).slice(0, 10);
+    const matches = patients.filter(p => (p.name || '').toLowerCase().includes(term)).slice(0, 10);
 
     if (matches.length === 0) {
         elements.calendarPatientAutocomplete.innerHTML = `
@@ -5055,7 +5066,7 @@ function showCalendarDoctorAutocomplete(searchTerm) {
     }
 
     const term = searchTerm.toLowerCase();
-    const matches = doctors.filter(d => d.name.toLowerCase().includes(term)).slice(0, 10);
+    const matches = doctors.filter(d => (d.name || '').toLowerCase().includes(term)).slice(0, 10);
 
     if (matches.length === 0) {
         elements.calendarDoctorAutocomplete.innerHTML = `
@@ -6516,7 +6527,7 @@ function saveInstruction(e) {
     
     // Save new doctor if typed and not in list
     const newDoctor = elements.instructNextDoctor.value.trim();
-    if (newDoctor && !doctors.some(d => d.name.toLowerCase() === newDoctor.toLowerCase())) {
+    if (newDoctor && !doctors.some(d => (d.name || '').toLowerCase() === newDoctor.toLowerCase())) {
         doctors.push({
             id: 'D' + String(doctors.length + 1).padStart(4, '0'),
             name: newDoctor,
@@ -6556,7 +6567,7 @@ function saveInstruction(e) {
         selectedTests.some(t => t === 'Blood Test' || t === 'C&S Results')) {
         const patientLabs = labRecords.filter(lab => 
             lab.patientId === patientId || 
-            (lab.patientName && lab.patientName.toLowerCase() === appt.patientName.toLowerCase())
+            (lab.patientName && lab.patientName.toLowerCase() === (appt.patientName || '').toLowerCase())
         );
         
         if (patientLabs.length > 0) {
@@ -7262,10 +7273,11 @@ function filterLabTracker() {
 
     // Filter by search term
     if (searchTerm) {
-        filtered = filtered.filter(lab =>
-            lab.patientName.toLowerCase().includes(searchTerm) ||
-            lab.doctorName.toLowerCase().includes(searchTerm)
-        );
+        filtered = filtered.filter(lab => {
+            const pName = (lab.patientName || '').toLowerCase();
+            const dName = (lab.doctorName || '').toLowerCase();
+            return pName.includes(searchTerm) || dName.includes(searchTerm);
+        });
     }
 
     // Filter by status
@@ -7746,7 +7758,7 @@ function showLabPatientAutocomplete(searchTerm) {
     }
 
     const term = searchTerm.toLowerCase();
-    const matches = patients.filter(p => p.name.toLowerCase().includes(term)).slice(0, 10);
+    const matches = patients.filter(p => (p.name || '').toLowerCase().includes(term)).slice(0, 10);
     
     console.log('[LabAutocomplete] matches found:', matches.length);
 
@@ -7803,7 +7815,7 @@ function showLabDoctorAutocomplete(searchTerm) {
     }
 
     const term = searchTerm.toLowerCase();
-    const matches = doctors.filter(d => d.name.toLowerCase().includes(term)).slice(0, 10);
+    const matches = doctors.filter(d => (d.name || '').toLowerCase().includes(term)).slice(0, 10);
 
     if (matches.length === 0) {
         elements.labDoctorAutocomplete.innerHTML = `

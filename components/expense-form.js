@@ -1196,7 +1196,7 @@ class ExpenseFormComponent {
         // Get patients from global patients array
         const patientsList = window.patients || [];
         const term = searchTerm.toLowerCase();
-        const matches = patientsList.filter(p => p.name.toLowerCase().includes(term)).slice(0, 10);
+        const matches = patientsList.filter(p => (p.name || '').toLowerCase().includes(term)).slice(0, 10);
 
         if (matches.length === 0) {
             autocomplete.innerHTML = `
@@ -1265,7 +1265,7 @@ class ExpenseFormComponent {
         // Get doctors from global doctors array
         const doctorsList = window.doctors || [];
         const term = searchTerm.toLowerCase();
-        const matches = doctorsList.filter(d => d.name.toLowerCase().includes(term)).slice(0, 10);
+        const matches = doctorsList.filter(d => (d.name || '').toLowerCase().includes(term)).slice(0, 10);
 
         if (matches.length === 0) {
             autocomplete.innerHTML = `

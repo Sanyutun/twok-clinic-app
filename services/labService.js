@@ -73,8 +73,10 @@ class LabService {
      * @returns {Array}
      */
     getLabsByPatientName(patientName) {
+        if (!patientName) return [];
+        const term = patientName.toLowerCase();
         return this.labRecords.filter(lab => 
-            lab.patientName && lab.patientName.toLowerCase().includes(patientName.toLowerCase())
+            lab.patientName && lab.patientName.toLowerCase().includes(term)
         );
     }
 

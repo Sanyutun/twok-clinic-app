@@ -207,8 +207,11 @@
                 await m.flushQueue();
                 await m.pullAll();
             } else if (m && typeof m.sync === 'function') {
-                m.sync();
+                await m.sync();
             }
+            
+            // Refresh the page once sync is complete
+            window.location.reload();
         };
 
         // Start periodic sync
