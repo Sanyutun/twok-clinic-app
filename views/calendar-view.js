@@ -42,8 +42,9 @@ class CalendarViewApp {
             // Setup WebSocket for real-time updates
             this.setupWebSocket();
             
-            // Update connection status
+            // Update connection status and setup fallback polling
             this.updateConnectionStatus();
+            setInterval(() => this.updateConnectionStatus(), 5000);
             
             // Setup connection status listeners
             window.addEventListener('online', () => this.updateConnectionStatus());

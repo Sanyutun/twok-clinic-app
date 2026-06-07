@@ -372,8 +372,6 @@ class ExpenseFormComponent {
             // Show/hide custom expense type section
             if (e.target.value === 'Custom') {
                 customSection.classList.remove('hidden');
-                // Focus custom type input
-                setTimeout(() => document.getElementById('globalCustomExpenseType').focus(), 100);
             } else {
                 customSection.classList.add('hidden');
                 // Reset custom fields
@@ -480,105 +478,11 @@ class ExpenseFormComponent {
             }
         });
 
-        // Add Enter key navigation for all form fields
-        this.setupKeyNavigation('globalExpensePatientName', 'globalExpenseDoctorName');
-        this.setupKeyNavigation('globalExpenseDoctorName', 'globalExpenseType', true); // true = open dropdown
-        this.setupKeyNavigation('globalExpenseType', 'globalExpenseItemName');
-        this.setupKeyNavigation('globalExpenseItemName', 'globalExpenseAmount');
-        this.setupKeyNavigation('globalExpenseAmount', 'globalExpenseDateTime');
-        this.setupKeyNavigation('globalExpenseDateTime', 'globalExpenseNote');
-
-        // Expense type dropdown - focus item name when changed
-        document.getElementById('globalExpenseType').addEventListener('change', () => {
-            setTimeout(() => {
-                document.getElementById('globalExpenseItemName').focus();
-            }, 100);
-        });
-
-        // Mobile-friendly auto-advance on input change
-        document.getElementById('globalExpensePatientName').addEventListener('blur', () => {
-            // On mobile, when patient name is selected and user moves away, focus doctor
-            setTimeout(() => {
-                if (!document.activeElement.closest('#globalExpensePatientName') && document.getElementById('globalExpensePatientName').value) {
-                    document.getElementById('globalExpenseDoctorName').focus();
-                }
-            }, 200);
-        });
-
-        document.getElementById('globalExpenseDoctorName').addEventListener('blur', () => {
-            setTimeout(() => {
-                if (!document.activeElement.closest('#globalExpenseDoctorName') && document.getElementById('globalExpenseDoctorName').value) {
-                    document.getElementById('globalExpenseType').focus();
-                }
-            }, 200);
-        });
-
-        document.getElementById('globalExpenseItemName').addEventListener('blur', () => {
-            setTimeout(() => {
-                if (!document.activeElement.closest('#globalExpenseItemName') && document.getElementById('globalExpenseItemName').value) {
-                    document.getElementById('globalExpenseAmount').focus();
-                }
-            }, 200);
-        });
-
-        document.getElementById('globalExpenseAmount').addEventListener('blur', () => {
-            setTimeout(() => {
-                if (!document.activeElement.closest('#globalExpenseAmount')) {
-                    document.getElementById('globalExpenseDateTime').focus();
-                }
-            }, 200);
-        });
-
-        // Date & Time - always focus Notes on blur (mobile)
-        document.getElementById('globalExpenseDateTime').addEventListener('blur', () => {
-            setTimeout(() => {
-                if (!document.activeElement.closest('#globalExpenseDateTime')) {
-                    document.getElementById('globalExpenseNote').focus();
-                }
-            }, 200);
-        });
-
         // Notes textarea - focus save button on Ctrl+Enter
         document.getElementById('globalExpenseNote').addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 document.getElementById('globalExpenseForm').dispatchEvent(new Event('submit', { cancelable: true }));
-            }
-        });
-    }
-
-    /**
-     * Setup Enter key navigation between form fields
-     */
-    setupKeyNavigation(fromId, toId, openDropdown = false) {
-        const fromElement = document.getElementById(fromId);
-        if (!fromElement) return;
-
-        fromElement.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                // Don't prevent default for textarea (allow new lines)
-                if (fromElement.tagName !== 'TEXTAREA') {
-                    e.preventDefault();
-                }
-                const toElement = document.getElementById(toId);
-                if (toElement) {
-                    toElement.focus();
-                    // Select text for input fields
-                    if (toElement.tagName === 'INPUT' && toElement.type !== 'datetime-local') {
-                        toElement.select();
-                    } else if (toElement.tagName === 'SELECT' && openDropdown) {
-                        // Open dropdown by simulating Alt+ArrowDown or using showPicker
-                        if (typeof toElement.showPicker === 'function') {
-                            toElement.showPicker();
-                        } else {
-                            // Fallback: dispatch keydown events to open dropdown
-                            const downEvent = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true });
-                            toElement.dispatchEvent(downEvent);
-                            const spaceEvent = new KeyboardEvent('keydown', { key: ' ', bubbles: true });
-                            toElement.dispatchEvent(spaceEvent);
-                        }
-                    }
-                }
             }
         });
     }
@@ -653,11 +557,6 @@ class ExpenseFormComponent {
         // Show modal
         document.getElementById('expenseFormModal').classList.remove('hidden');
         this.isVisible = true;
-
-        // Focus on Patient Name field after a brief delay to allow modal to render
-        setTimeout(() => {
-            document.getElementById('globalExpensePatientName').focus();
-        }, 100);
     }
 
     /**

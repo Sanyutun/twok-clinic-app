@@ -9,6 +9,7 @@ class DataLayer {
         this.dbName = 'TWOK_Clinic_DB';
         this.dbVersion = 3; 
         this.db = null;
+        this.subscriptionsActive = false;
         
         // Table mappings
         this.stores = [
@@ -17,6 +18,9 @@ class DataLayer {
             'expenses', 'expense_categories', 'lab_records',
             'settings', 'syncMeta'
         ];
+
+        // Setup listener for sync manager
+        this.setupSyncListener();
 
         // Allowed fields for each table (Frontend names)
         // Used for sanitizing data before saving to IndexedDB and Supabase
@@ -72,6 +76,26 @@ class DataLayer {
                 'id', 'value', 'updatedAt'
             ]
         };
+    }
+
+    /**
+     * Listen for connection changes to manage subscriptions
+     */
+    setupSyncListener() {
+        const manager = window.twokSyncManager || window.SyncManager;
+        if (manager) {
+            manager.addListener((event, data) => {
+                if (event === 'connection-change' || event === 'online') {
+                    const isOnline = data?.online !== undefined ? data.online : (event === 'online');
+                    if (isOnline && !this.subscriptionsActive && this.initialized) {
+                        console.log('[DataLayer] Connection restored, setting up realtime subscriptions...');
+                        this.setupRealtimeSubscriptions();
+                    } else if (!isOnline) {
+                        this.subscriptionsActive = false;
+                    }
+                }
+            });
+        }
     }
 
     /**
@@ -207,6 +231,22 @@ class DataLayer {
 
             request.onsuccess = () => {
                 this.db = request.result;
+                
+                // Handle unexpected closing
+                this.db.onclose = () => {
+                    console.warn('[DataLayer] Database connection closed unexpectedly');
+                    this.db = null;
+                };
+
+                // Handle version changes
+                this.db.onversionchange = () => {
+                    console.log('[DataLayer] Database version changed elsewhere, closing connection');
+                    if (this.db) {
+                        this.db.close();
+                    }
+                    this.db = null;
+                };
+
                 console.log('[DataLayer] ✅ IndexedDB opened');
                 resolve();
             };
@@ -227,18 +267,35 @@ class DataLayer {
     }
 
     /**
-     * Generic IndexedDB operation helper
+     * Generic IndexedDB operation helper (Robust version)
      * @param {string} storeName - Object store name
      * @param {string} mode - 'readonly' or 'readwrite'
-     * @returns {Object} - { transaction, store }
+     * @returns {Promise<Object>} - { transaction, store }
      */
-    dbTransaction(storeName, mode = 'readonly') {
+    async dbTransaction(storeName, mode = 'readonly') {
         if (!this.db) {
-            throw new Error('[DataLayer] Database not initialized. Call init() first.');
+            if (window.TWOKDB && typeof window.TWOKDB.openDB === 'function') {
+                this.db = await window.TWOKDB.openDB();
+            } else {
+                await this.initIndexedDB();
+            }
         }
-        const transaction = this.db.transaction(storeName, mode);
-        const store = transaction.objectStore(storeName);
-        return { transaction, store };
+
+        try {
+            const transaction = this.db.transaction(storeName, mode);
+            const store = transaction.objectStore(storeName);
+            return { transaction, store };
+        } catch (error) {
+            // Handle closing connection
+            if (error.name === 'InvalidStateError' || 
+                error.message.includes('closing') || 
+                error.message.includes('closed')) {
+                console.warn('[DataLayer] Transaction failed due to closing connection, retrying...');
+                this.db = null;
+                return this.dbTransaction(storeName, mode);
+            }
+            throw error;
+        }
     }
 
     /**
@@ -247,17 +304,17 @@ class DataLayer {
      * @returns {Promise<Array>}
      */
     async getAll(storeName) {
-        return new Promise((resolve, reject) => {
-            try {
-                const { store } = this.dbTransaction(storeName, 'readonly');
+        try {
+            const { store } = await this.dbTransaction(storeName, 'readonly');
+            return new Promise((resolve, reject) => {
                 const request = store.getAll();
-
                 request.onsuccess = () => resolve(request.result);
                 request.onerror = () => reject(request.error);
-            } catch (err) {
-                reject(err);
-            }
-        });
+            });
+        } catch (err) {
+            console.error(`[DataLayer] getAll failed for ${storeName}:`, err);
+            throw err;
+        }
     }
 
     /**
@@ -267,17 +324,17 @@ class DataLayer {
      * @returns {Promise<void>}
      */
     async put(storeName, record) {
-        return new Promise((resolve, reject) => {
-            try {
-                const { store } = this.dbTransaction(storeName, 'readwrite');
+        try {
+            const { store } = await this.dbTransaction(storeName, 'readwrite');
+            return new Promise((resolve, reject) => {
                 const request = store.put(record);
-
                 request.onsuccess = () => resolve();
                 request.onerror = () => reject(request.error);
-            } catch (err) {
-                reject(err);
-            }
-        });
+            });
+        } catch (err) {
+            console.error(`[DataLayer] put failed for ${storeName}:`, err);
+            throw err;
+        }
     }
 
     /**
@@ -288,11 +345,10 @@ class DataLayer {
      */
     async delete(storeName, id) {
         console.log(`[DataLayer] Deleting ${id} from ${storeName}`);
-        return new Promise((resolve, reject) => {
-            try {
-                const { store } = this.dbTransaction(storeName, 'readwrite');
+        try {
+            const { store } = await this.dbTransaction(storeName, 'readwrite');
+            return new Promise((resolve, reject) => {
                 const request = store.delete(id);
-
                 request.onsuccess = () => {
                     console.log(`[DataLayer] ✅ Deleted ${id} from ${storeName}`);
                     resolve();
@@ -301,11 +357,11 @@ class DataLayer {
                     console.error(`[DataLayer] ❌ Failed to delete ${id} from ${storeName}:`, request.error);
                     reject(request.error);
                 };
-            } catch (err) {
-                console.error(`[DataLayer] ❌ Error deleting ${id} from ${storeName}:`, err);
-                reject(err);
-            }
-        });
+            });
+        } catch (err) {
+            console.error(`[DataLayer] ❌ Error deleting ${id} from ${storeName}:`, err);
+            throw err;
+        }
     }
 
     /**
@@ -317,20 +373,20 @@ class DataLayer {
     async bulkPut(storeName, records) {
         if (!records || records.length === 0) return;
         
-        return new Promise((resolve, reject) => {
-            try {
-                const { transaction, store } = this.dbTransaction(storeName, 'readwrite');
-                
+        try {
+            const { transaction, store } = await this.dbTransaction(storeName, 'readwrite');
+            return new Promise((resolve, reject) => {
                 records.forEach(record => {
                     store.put(record);
                 });
 
                 transaction.oncomplete = () => resolve();
                 transaction.onerror = () => reject(transaction.error);
-            } catch (err) {
-                reject(err);
-            }
-        });
+            });
+        } catch (err) {
+            console.error(`[DataLayer] bulkPut failed for ${storeName}:`, err);
+            throw err;
+        }
     }
 
     /**
@@ -400,17 +456,17 @@ class DataLayer {
      * @returns {Promise<void>}
      */
     async clear(storeName) {
-        return new Promise((resolve, reject) => {
-            try {
-                const { store } = this.dbTransaction(storeName, 'readwrite');
+        try {
+            const { store } = await this.dbTransaction(storeName, 'readwrite');
+            return new Promise((resolve, reject) => {
                 const request = store.clear();
-
                 request.onsuccess = () => resolve();
                 request.onerror = () => reject(request.error);
-            } catch (err) {
-                reject(err);
-            }
-        });
+            });
+        } catch (err) {
+            console.error(`[DataLayer] clear failed for ${storeName}:`, err);
+            throw err;
+        }
     }
 
     // ==========================================
@@ -615,10 +671,10 @@ class DataLayer {
                 'nextAppointmentDate': 'next_appointment_date',
                 'followUpDoctor': 'follow_up_doctor',
                 'otherInstruction': 'other_instruction',
-                'transfer_hospital': 'transfer_hospital',
+                'transferHospital': 'transfer_hospital',
                 'selectedTests': 'selected_tests',
                 'linkedLabIds': 'linked_lab_ids',
-                'labTrackerId': 'lab_tracker_id'
+                'labTrackerId': 'linked_lab_ids'
                 },
             'expenses': {
                 'itemName': 'item_name',
@@ -669,7 +725,7 @@ class DataLayer {
             'is_next', 'penalty_turns', 'edited_time', 'date_time',
             'speciality', 'hospital', 'return_duration', 'return_unit',
             'next_appointment_date', 'follow_up_doctor', 'other_instruction',
-            'transfer_hospital', 'selected_tests', 'linked_lab_ids', 'lab_tracker_id',
+            'transfer_hospital', 'selected_tests', 'linked_lab_ids',
             'amount', 'category', 'remark', 'note', 'item_name',
             'expense_type', 'custom_type_name', 'custom_icon', 'appointment_id',
             'expense_id', 'lab_name', 'pending_tests', 'timeline', 'address', 'is_foc', 'value',
@@ -695,13 +751,18 @@ class DataLayer {
                     'edited_time', 'date_time', 'created_at', 'updated_at'
                 ];
                 const booleanFields = ['is_foc', 'is_next'];
-                const complexFields = ['selected_tests', 'pending_tests', 'timeline'];
+                const complexFields = ['selected_tests', 'pending_tests', 'timeline', 'linked_lab_ids'];
 
                 if ((numericFields.includes(field) || 
                      timestampFields.includes(field) || 
                      booleanFields.includes(field) || 
                      complexFields.includes(field)) && value === "") {
                     value = null;
+                }
+
+                // Special handling for array columns: ensure value is an array if coming from a string field
+                if (field === 'linked_lab_ids' && typeof value === 'string' && value !== "") {
+                    value = [value];
                 }
 
                 finalData[field] = value;
@@ -852,9 +913,9 @@ class DataLayer {
      * @returns {Promise<any>}
      */
     async getSetting(key) {
-        return new Promise((resolve, reject) => {
-            try {
-                const { store } = this.dbTransaction('settings', 'readonly');
+        try {
+            const { store } = await this.dbTransaction('settings', 'readonly');
+            return new Promise((resolve, reject) => {
                 const request = store.get(key);
                 request.onsuccess = () => {
                     const result = request.result;
@@ -869,10 +930,11 @@ class DataLayer {
                     }
                 };
                 request.onerror = () => reject(request.error);
-            } catch (err) {
-                reject(err);
-            }
-        });
+            });
+        } catch (err) {
+            console.error(`[DataLayer] getSetting failed for ${key}:`, err);
+            throw err;
+        }
     }
 
     /**
@@ -978,11 +1040,18 @@ class DataLayer {
             return;
         }
 
+        if (!navigator.onLine) {
+            console.log('[DataLayer] 📴 Offline: skipping realtime setup');
+            return;
+        }
+
         const tables = [
             'patients', 'doctors', 'appointments', 'instructions', 
             'expenses', 'lab_records', 'settings',
             'addresses', 'specialities', 'hospitals', 'expense_categories'
         ];
+
+        this.subscriptionsActive = true;
 
         for (const table of tables) {
             console.log(`[DataLayer] Subscribing to realtime changes for ${table}...`);

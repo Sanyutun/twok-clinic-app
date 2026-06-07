@@ -2559,9 +2559,17 @@ function renderAppointmentTable(filteredAppointments = null) {
     elements.appointmentEmptyTableMessage.classList.add('hidden');
     elements.appointmentTable.classList.remove('hidden');
 
-    // Sort by: 1) Status priority, 2) Penalty (no penalty first), 3) Booking number
+    // Sort by: 1) Status 'In Consult', 2) isNext (Locked next patient), 3) Status priority, 4) Penalty, 5) Booking number
     const sortedData = [...data].sort((a, b) => {
-        // Priority 1: Status priority (lower number = higher priority)
+        // Priority 1: Current consultation first
+        if (a.status === 'In Consult' && b.status !== 'In Consult') return -1;
+        if (a.status !== 'In Consult' && b.status === 'In Consult') return 1;
+
+        // Priority 2: Locked Next Patient (isNext)
+        if (a.isNext && !b.isNext) return -1;
+        if (!a.isNext && b.isNext) return 1;
+
+        // Priority 3: Status priority (lower number = higher priority)
         const aPriority = STATUS_PRIORITY[a.status] || 99;
         const bPriority = STATUS_PRIORITY[b.status] || 99;
 
@@ -2569,14 +2577,14 @@ function renderAppointmentTable(filteredAppointments = null) {
             return aPriority - bPriority;
         }
 
-        // Priority 2: Penalty (patients without penalty first)
+        // Priority 4: Penalty (patients without penalty first)
         const aHasPenalty = a.penaltyTurns && a.penaltyTurns > 0;
         const bHasPenalty = b.penaltyTurns && b.penaltyTurns > 0;
 
         if (aHasPenalty && !bHasPenalty) return 1;
         if (!aHasPenalty && bHasPenalty) return -1;
 
-        // Priority 3: Booking number ascending
+        // Priority 5: Booking number ascending
         if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
         if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
         return parseInt(a.bookingNumber, 10) - parseInt(b.bookingNumber, 10);
@@ -2949,11 +2957,17 @@ async function startConsultation(appointmentId) {
 
     const appt = appointments[index];
     appt.status = 'In Consult';
+    appt.isNext = false; // Clear locked status when starting
     appt.consultStartTime = toLocalISOString(new Date());
+    appt.penaltyTurns = 0; // Clear any penalty turns when consultation starts
+    
+    // Automatically designate the new next patient
+    autoDesignateNextPatient(appt.doctorName);
+    
     await saveAppointmentsToStorage();
     renderAppointmentTable();
     updateQueueSummary();
-    showNotification('Consultation started');
+    showNotification(`Consultation started for #${appt.bookingNumber || '-'} ${appt.patientName}`);
 
     // Broadcast to TV display
     sendQueueEvent('consultation_started', {
@@ -3023,17 +3037,19 @@ async function handleInvestigationYes() {
     // Track this patient as "just investigated" so they're excluded from next candidate list
     lastInvestigatedPatientId = currentConsultingAppointment;
 
-    // Now show patient selection section for next patient
+    // Fetch today's appointments for candidate list
+    const today = toLocalDateString(new Date());
+    const todayAppointments = appointments.filter(a =>
+        a.appointmentTime && a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
+    );
+
+    // Always show patient selection section for next patient
     elements.patientSelectionSection.classList.remove('hidden');
     elements.investigationDialog.querySelector('.current-patient-info').classList.add('hidden');
     elements.investigationDialog.querySelector('.investigation-question').classList.add('hidden');
     elements.investigationDialog.querySelector('.investigation-dialog-actions').classList.add('hidden');
 
-    // Build candidate list for next patient (will exclude the just-investigated patient)
-    const today = toLocalDateString(new Date());
-    const todayAppointments = appointments.filter(a =>
-        a.appointmentTime && a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
-    );
+    // Build candidate list and show first candidate for confirmation
     buildCandidateList(todayAppointments);
 
     renderAppointmentTable();
@@ -3095,17 +3111,19 @@ async function handleInvestigationNo() {
 
     await saveAppointmentsToStorage();
 
-    // Now show patient selection section for next patient
+    // Check if there is already a designated next patient (to get the list)
+    const today = toLocalDateString(new Date());
+    const todayAppointments = appointments.filter(a =>
+        a.appointmentTime && a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
+    );
+    
+    // Always show patient selection section for next patient
     elements.patientSelectionSection.classList.remove('hidden');
     elements.investigationDialog.querySelector('.current-patient-info').classList.add('hidden');
     elements.investigationDialog.querySelector('.investigation-question').classList.add('hidden');
     elements.investigationDialog.querySelector('.investigation-dialog-actions').classList.add('hidden');
 
-    // Build candidate list for next patient
-    const today = toLocalDateString(new Date());
-    const todayAppointments = appointments.filter(a =>
-        a.appointmentTime && a.appointmentTime.startsWith(today) && a.doctorName === TARGET_DOCTOR_NAME
-    );
+    // Build candidate list and show first candidate for confirmation
     buildCandidateList(todayAppointments);
 
     renderAppointmentTable();
@@ -3136,6 +3154,10 @@ async function handleInvestigationNo() {
  */
 function sortAppointmentsForQueue(appts) {
     return [...appts].sort((a, b) => {
+        // Priority 0: Locked Next Patient (isNext)
+        if (a.isNext && !b.isNext) return -1;
+        if (!a.isNext && b.isNext) return 1;
+
         // Priority 1: Status priority
         const aPriority = STATUS_PRIORITY[a.status] || 99;
         const bPriority = STATUS_PRIORITY[b.status] || 99;
@@ -3280,12 +3302,11 @@ function updateQueueSummary() {
         a.doctorName === TARGET_DOCTOR_NAME
     );
 
-    const queueSorted = sortAppointmentsForQueue(
-        doctorAppointments.filter(a =>
-            ['Arrived', 'Investigation', 'Booked', 'Noted'].includes(a.status)
-        )
+    const eligibleForNext = doctorAppointments.filter(a =>
+        ['Arrived', 'Investigation', 'Booked', 'Noted'].includes(a.status)
     );
 
+    const queueSorted = sortAppointmentsForQueue(eligibleForNext);
     const nextPatient = queueSorted[0];
 
     // Find current consulting patient
@@ -3295,7 +3316,8 @@ function updateQueueSummary() {
     let nextPatientDisplay = '-';
     if (nextPatient) {
         const penaltyInfo = nextPatient.penaltyTurns > 0 ? ` ⚠️` : '';
-        nextPatientDisplay = `${nextPatient.patientName} (#${nextPatient.bookingNumber || '-'})${penaltyInfo}`;
+        const lockedInfo = nextPatient.isNext ? ' 🔒' : '';
+        nextPatientDisplay = `${nextPatient.patientName} (#${nextPatient.bookingNumber || '-'})${penaltyInfo}${lockedInfo}`;
     }
 
     // Display current consulting patient
@@ -3309,6 +3331,38 @@ function updateQueueSummary() {
     elements.doneCount.textContent = done;
     elements.nextPatientName.textContent = nextPatientDisplay;
     elements.currentConsultName.textContent = currentConsultDisplay;
+}
+
+/**
+ * Automatically designate and lock the next patient for a doctor
+ * Only picks a new one if no patient is currently marked as isNext
+ * @param {string} doctorName 
+ */
+async function autoDesignateNextPatient(doctorName = TARGET_DOCTOR_NAME) {
+    const today = toLocalDateString(new Date());
+    const eligible = appointments.filter(a =>
+        a.doctorName === doctorName &&
+        ['Arrived', 'Investigation', 'Booked', 'Noted'].includes(a.status) &&
+        (a.appointmentTime?.startsWith(today) || a.createdAt?.startsWith(today))
+    );
+
+    // If someone is already isNext and still eligible, do nothing
+    if (eligible.some(a => a.isNext)) return;
+
+    // Clear any stale isNext flags for this doctor (safety check)
+    appointments.forEach(a => {
+        if (a.doctorName === doctorName) a.isNext = false;
+    });
+
+    if (eligible.length > 0) {
+        // Sort using the standard rules
+        const sorted = sortAppointmentsForQueue(eligible);
+        // The first one becomes the locked next patient
+        sorted[0].isNext = true;
+        
+        await saveAppointmentsToStorage();
+        console.log(`[Queue] Auto-designated #${sorted[0].bookingNumber} ${sorted[0].patientName} as Next`);
+    }
 }
 
 /**
@@ -3336,7 +3390,9 @@ function handleNextPatient() {
         return;
     }
 
-    // Step 2: No one is consulting - show patient selection dialog
+    // Step 2: No one is consulting - show patient selection dialog for confirmation
+    // We now always show the dialog even if there's a locked patient, 
+    // so the doctor can confirm if they are ready or skip.
     showPatientSelectionDialog();
 }
 
@@ -3373,7 +3429,7 @@ let lastInvestigatedPatientId = null; // Track patient who just went to investig
 
 /**
  * Build sorted candidate list for patient selection
- * Priority: Investigation > Arrived (no penalty) > Arrived (with penalty)
+ * Priority: 1) Locked Next Patient (isNext), 2) Investigation, 3) Arrived
  * Note: Excludes the patient who JUST went to investigation from current consult
  * @param {Array} todayAppointments - Today's appointments for target doctor
  */
@@ -3381,46 +3437,28 @@ function buildCandidateList(todayAppointments) {
     patientCandidates = [];
     currentCandidateIndex = 0;
 
-    // Investigation patients (highest priority) - EXCLUDE the one just investigated
-    const investigationPatients = todayAppointments
-        .filter(a => a.status === 'Investigation' && a.id !== lastInvestigatedPatientId)
-        .sort((a, b) => {
-            if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
-            if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
-            return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
-        });
+    // Filter eligible patients: Arrived or Investigation, and NOT the one just sent to investigation
+    const eligible = todayAppointments.filter(a => 
+        ['Arrived', 'Investigation'].includes(a.status) && a.id !== lastInvestigatedPatientId
+    );
 
-    // Arrived patients without penalty
-    const arrivedNoPenalty = todayAppointments
-        .filter(a =>
-            a.status === 'Arrived' &&
-            (!a.penaltyTurns || a.penaltyTurns <= 0)
-        )
-        .sort((a, b) => {
-            if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
-            if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
-            return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
-        });
+    // Sort using the standard rules (which prioritizes isNext)
+    const sorted = sortAppointmentsForQueue(eligible);
 
-    // Arrived patients with penalty (sorted by penalty count, then booking number)
-    const arrivedWithPenalty = todayAppointments
-        .filter(a =>
-            a.status === 'Arrived' &&
-            a.penaltyTurns && a.penaltyTurns > 0
-        )
-        .sort((a, b) => {
-            if (a.penaltyTurns !== b.penaltyTurns) {
-                return a.penaltyTurns - b.penaltyTurns;
-            }
-            if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
-            if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
-            return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
+    // Map to candidate objects with appropriate categories
+    sorted.forEach(p => {
+        let category = 'arrived';
+        if (p.status === 'Investigation') {
+            category = 'investigation';
+        } else if (p.penaltyTurns > 0) {
+            category = 'penalty';
+        }
+        
+        patientCandidates.push({ 
+            appointment: p, 
+            category: category
         });
-
-    // Combine all candidates with category info
-    investigationPatients.forEach(p => patientCandidates.push({ appointment: p, category: 'investigation' }));
-    arrivedNoPenalty.forEach(p => patientCandidates.push({ appointment: p, category: 'arrived' }));
-    arrivedWithPenalty.forEach(p => patientCandidates.push({ appointment: p, category: 'penalty' }));
+    });
 
     // Clear the "just investigated" flag after building the list
     lastInvestigatedPatientId = null;
@@ -3447,6 +3485,20 @@ function showCandidate(index) {
     currentCandidateIndex = index;
     const candidate = patientCandidates[index];
     const patient = candidate.appointment;
+
+    // Mark this patient as the locked next patient
+    // First, clear isNext for all appointments for this doctor
+    appointments.forEach(a => {
+        if (a.doctorName === patient.doctorName) {
+            a.isNext = false;
+        }
+    });
+    
+    // Set isNext for this patient
+    patient.isNext = true;
+    saveAppointmentsToStorage();
+    renderAppointmentTable();
+    updateQueueSummary();
 
     // Update patient card display
     const bookingNum = patient.bookingNumber !== null && patient.bookingNumber !== undefined ? patient.bookingNumber : '-';
@@ -3504,35 +3556,28 @@ function callNextPatient(patient) {
 
     if (!currentInConsult) {
         // No one is consulting - start consultation for this patient
-        patient.status = 'In Consult';
-        patient.consultStartTime = toLocalISOString(new Date());
-        patient.penaltyTurns = 0; // Clear any penalty turns
-        
-        saveAppointmentsToStorage();
-        renderAppointmentTable();
-        updateQueueSummary();
-
-        showNotification(`Calling patient #${patient.bookingNumber || '-'} ${patient.patientName} to consultation`, 'success');
-
-        // Broadcast to TV display
-        sendQueueEvent('consultation_started', {
-            appointmentId: patient.id,
-            bookingNumber: patient.bookingNumber,
-            patientName: patient.patientName,
-            status: 'In Consult',
-            doctorName: patient.doctorName
-        });
+        startConsultation(patient.id);
     } else {
         // Someone is already consulting - queue this patient for next turn
         // Set status to Arrived with 0 penalty turns (highest priority for next)
+        // AND mark them as the locked next patient
+        
+        // Clear isNext for all appointments for this doctor
+        appointments.forEach(a => {
+            if (a.doctorName === patient.doctorName) {
+                a.isNext = false;
+            }
+        });
+        
         patient.status = 'Arrived';
         patient.penaltyTurns = 0;
+        patient.isNext = true;
         
         saveAppointmentsToStorage();
         renderAppointmentTable();
         updateQueueSummary();
 
-        showNotification(`Patient #${patient.bookingNumber || '-'} ${patient.patientName} queued for next turn`, 'info');
+        showNotification(`Patient #${patient.bookingNumber || '-'} ${patient.patientName} queued as next`, 'success');
 
         // Broadcast to TV display
         sendQueueEvent('patient_queued', {

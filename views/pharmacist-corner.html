@@ -6,7 +6,7 @@
     <meta name="description" content="TWOK Clinic - Pharmacist Corner for medication and expense management">
     <meta name="theme-color" content="#2c7be5">
     <title>Pharmacist Corner - TWOK Clinic</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="../style.css">
     <style>
         /* Pharmacist Corner Specific Styles */
         :root {
@@ -422,14 +422,33 @@
         </div>
     </div>
 
-    <!-- Load shared styles -->
-    <link rel="stylesheet" href="style.css">
-    
-    <!-- Load services and components -->
-    <script src="components/instruction-form.js"></script>
-    <script src="components/expense-form.js"></script>
+    <!-- Online/Offline Status Indicator -->
+    <div id="globalConnectionStatus" class="connection-status online">🟢 Online</div>
+
+    <!-- Components -->
+    <script src="../components/instruction-form.js"></script>
+    <script src="../components/expense-form.js"></script>
 
     <!-- Pharmacist Corner Script -->
-    <script src="js/pharmacist-corner.js"></script>
-</body>
+    <script src="../js/pharmacist-corner.js"></script>
+
+    <script>
+        // Online/Offline status handling
+        function updateGlobalConnectionStatus() {
+            const isOnline = navigator.onLine;
+            const el = document.getElementById('globalConnectionStatus');
+            if (el) {
+                el.textContent = isOnline ? '🟢 Online' : '🔴 Offline';
+                el.className = `connection-status ${isOnline ? 'online' : 'offline'}`;
+            }
+        }
+
+        window.addEventListener('online', updateGlobalConnectionStatus);
+        window.addEventListener('offline', updateGlobalConnectionStatus);
+
+        // Initial check and fallback polling
+        updateGlobalConnectionStatus();
+        setInterval(updateGlobalConnectionStatus, 5000);
+    </script>
+    </body>
 </html>

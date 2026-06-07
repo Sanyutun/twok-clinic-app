@@ -2213,22 +2213,41 @@
         });
 
         // Online/Offline status handling
+        let lastKnownOnlineStatus = navigator.onLine;
+
         function updateGlobalConnectionStatus() {
-            if (navigator.onLine) {
-                globalConnectionStatusEl.textContent = '🟢 Online';
-                globalConnectionStatusEl.className = 'connection-status online';
-            } else {
-                globalConnectionStatusEl.textContent = '🔴 Offline';
-                globalConnectionStatusEl.className = 'connection-status offline';
-                showNotification('You are offline. Some features may be limited.', 'error');
+            const isOnline = navigator.onLine;
+            
+            // Update global indicator
+            const globalEl = document.getElementById('globalConnectionStatus');
+            if (globalEl) {
+                globalEl.textContent = isOnline ? '🟢 Online' : '🔴 Offline';
+                globalEl.className = `connection-status ${isOnline ? 'online' : 'offline'}`;
             }
+
+            // Update calendar indicator if it exists
+            const calEl = document.getElementById('calendarConnectionStatus');
+            if (calEl) {
+                calEl.className = `status-indicator ${isOnline ? 'online' : 'offline'}`;
+                calEl.title = isOnline ? 'Online' : 'Offline';
+            }
+            
+            // Only show notification if status changed from online to offline
+            if (!isOnline && lastKnownOnlineStatus && typeof showNotification === 'function') {
+                showNotification('You are offline. Changes will sync automatically.', 'warning');
+            } else if (isOnline && !lastKnownOnlineStatus && typeof showNotification === 'function') {
+                showNotification('Back online! Syncing changes...', 'success');
+            }
+
+            lastKnownOnlineStatus = isOnline;
         }
 
         window.addEventListener('online', updateGlobalConnectionStatus);
         window.addEventListener('offline', updateGlobalConnectionStatus);
 
-        // Initial check
+        // Initial check and fallback polling
         updateGlobalConnectionStatus();
+        setInterval(updateGlobalConnectionStatus, 5000);
     </script>
 </body>
 </html>

@@ -44,9 +44,9 @@ function setStorageAdapter(adapter) {
  * Open database connection
  * @returns {Promise<IDBDatabase>}
  */
-function openDB() {
+async function openDB() {
     if (dbInstance) {
-        return Promise.resolve(dbInstance);
+        return dbInstance;
     }
 
     if (dbOpenPromise) {
@@ -54,55 +54,106 @@ function openDB() {
     }
 
     dbOpenPromise = new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        try {
+            const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-        request.onerror = () => {
-            dbOpenPromise = null;
-            reject(new Error('Failed to open IndexedDB: ' + request.error));
-        };
-
-        request.onsuccess = () => {
-            dbInstance = request.result;
-            dbInstance.onclose = () => {
-                dbInstance = null;
+            request.onerror = () => {
+                dbOpenPromise = null;
+                reject(new Error('Failed to open IndexedDB: ' + request.error));
             };
-            resolve(dbInstance);
-        };
 
-        request.onupgradeneeded = (event) => {
-            const db = event.target.result;
-            const transaction = event.target.transaction;
-
-            // Create object stores with auto-increment keys
-            Object.values(STORES).forEach(storeName => {
-                if (!db.objectStoreNames.contains(storeName)) {
-                    db.createObjectStore(storeName, { keyPath: 'id', autoIncrement: false });
-                }
-            });
-
-            // Migrate lab_tracker to lab_records if it exists
-            if (db.objectStoreNames.contains('lab_tracker') && !db.objectStoreNames.contains('lab_records_migrated')) {
-                console.log('[TWOKDB] Migrating lab_tracker to lab_records...');
-                const oldStore = transaction.objectStore('lab_tracker');
-                const newStore = transaction.objectStore('lab_records');
+            request.onsuccess = () => {
+                dbInstance = request.result;
                 
-                oldStore.openCursor().onsuccess = (e) => {
-                    const cursor = e.target.result;
-                    if (cursor) {
-                        newStore.put(cursor.value);
-                        cursor.continue();
-                    } else {
-                        console.log('[TWOKDB] Lab migration data copy complete');
-                        // We can't easily delete store while cursor is open or in same transaction without care
-                        // So we just mark as migrated and legacy code will use the new store
-                        db.createObjectStore('lab_records_migrated'); 
-                    }
+                // Handle unexpected closing
+                dbInstance.onclose = () => {
+                    console.warn('[TWOKDB] Database connection closed unexpectedly');
+                    dbInstance = null;
+                    dbOpenPromise = null;
                 };
-            }
-        };
+
+                // Handle version changes from other tabs/connections
+                dbInstance.onversionchange = () => {
+                    console.log('[TWOKDB] Database version changed elsewhere, closing connection');
+                    if (dbInstance) {
+                        dbInstance.close();
+                    }
+                    dbInstance = null;
+                    dbOpenPromise = null;
+                };
+
+                resolve(dbInstance);
+            };
+
+            request.onblocked = () => {
+                console.warn('[TWOKDB] Database open blocked by another connection');
+            };
+
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                const transaction = event.target.transaction;
+
+                // Create object stores with auto-increment keys
+                Object.values(STORES).forEach(storeName => {
+                    if (!db.objectStoreNames.contains(storeName)) {
+                        db.createObjectStore(storeName, { keyPath: 'id', autoIncrement: false });
+                    }
+                });
+
+                // Migrate lab_tracker to lab_records if it exists
+                if (db.objectStoreNames.contains('lab_tracker') && !db.objectStoreNames.contains('lab_records_migrated')) {
+                    console.log('[TWOKDB] Migrating lab_tracker to lab_records...');
+                    const oldStore = transaction.objectStore('lab_tracker');
+                    const newStore = transaction.objectStore('lab_records');
+                    
+                    oldStore.openCursor().onsuccess = (e) => {
+                        const cursor = e.target.result;
+                        if (cursor) {
+                            newStore.put(cursor.value);
+                            cursor.continue();
+                        } else {
+                            console.log('[TWOKDB] Lab migration data copy complete');
+                            // We can't easily delete store while cursor is open or in same transaction without care
+                            // So we just mark as migrated and legacy code will use the new store
+                            db.createObjectStore('lab_records_migrated'); 
+                        }
+                    };
+                }
+            };
+        } catch (error) {
+            dbOpenPromise = null;
+            reject(error);
+        }
     });
 
     return dbOpenPromise;
+}
+
+/**
+ * Helper to safely get a transaction, with retry if connection is closing
+ * @param {string|Array<string>} storeNames 
+ * @param {string} mode 
+ * @param {boolean} retry 
+ * @returns {Promise<IDBTransaction>}
+ */
+async function getTransaction(storeNames, mode = 'readonly', retry = true) {
+    const db = await openDB();
+    try {
+        return db.transaction(storeNames, mode);
+    } catch (error) {
+        // If connection is closing or closed, force a reopen and retry once
+        if (retry && (
+            error.name === 'InvalidStateError' || 
+            error.message.includes('closing') || 
+            error.message.includes('closed')
+        )) {
+            console.warn('[TWOKDB] Transaction failed due to closing connection, forcing reconnect...', error.message);
+            dbInstance = null;
+            dbOpenPromise = null;
+            return getTransaction(storeNames, mode, false);
+        }
+        throw error;
+    }
 }
 
 /**
@@ -112,9 +163,8 @@ function openDB() {
  */
 async function getAll(storeName) {
     // Always fetch from IndexedDB to ensure fresh data for real-time updates
-    const db = await openDB();
+    const transaction = await getTransaction(storeName, 'readonly');
     const records = await new Promise((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readonly');
         const store = transaction.objectStore(storeName);
         const request = store.getAll();
 
@@ -137,9 +187,8 @@ async function getAll(storeName) {
  * @returns {Promise<Object|null>}
  */
 async function getById(storeName, id) {
-    const db = await openDB();
+    const transaction = await getTransaction(storeName, 'readonly');
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readonly');
         const store = transaction.objectStore(storeName);
         const request = store.get(id);
 
@@ -225,9 +274,8 @@ async function put(storeName, item, skipSync = false) {
     }
     
     // Fall back to IndexedDB
-    const db = await openDB();
+    const transaction = await getTransaction(storeName, 'readwrite');
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readwrite');
         const store = transaction.objectStore(storeName);
         const request = store.put(item);
 
@@ -295,9 +343,8 @@ async function remove(storeName, id, skipSync = false) {
     }
     
     // Fall back to IndexedDB
-    const db = await openDB();
+    const transaction = await getTransaction(storeName, 'readwrite');
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readwrite');
         const store = transaction.objectStore(storeName);
         const request = store.delete(id);
 
@@ -312,9 +359,8 @@ async function remove(storeName, id, skipSync = false) {
  * @returns {Promise<void>}
  */
 async function clear(storeName) {
-    const db = await openDB();
+    const transaction = await getTransaction(storeName, 'readwrite');
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readwrite');
         const store = transaction.objectStore(storeName);
         const request = store.clear();
 
@@ -329,9 +375,8 @@ async function clear(storeName) {
  * @returns {Promise<number>}
  */
 async function count(storeName) {
-    const db = await openDB();
+    const transaction = await getTransaction(storeName, 'readonly');
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readonly');
         const store = transaction.objectStore(storeName);
         const request = store.count();
 
@@ -358,9 +403,8 @@ async function bulkPut(storeName, items, skipSync = false) {
         }
     }
 
-    const db = await openDB();
+    const transaction = await getTransaction(storeName, 'readwrite');
     await new Promise((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readwrite');
         const store = transaction.objectStore(storeName);
 
         items.forEach(item => {
@@ -374,8 +418,8 @@ async function bulkPut(storeName, items, skipSync = false) {
     // If storage adapter is present, refresh its cache to ensure consistency
     // We fetch all records because bulkPut might be a partial update or full replace
     if (storageAdapterInstance && typeof storageAdapterInstance.updateCache === 'function') {
-        const transaction = db.transaction(storeName, 'readonly');
-        const store = transaction.objectStore(storeName);
+        const readTransaction = await getTransaction(storeName, 'readonly');
+        const store = readTransaction.objectStore(storeName);
         const request = store.getAll();
         request.onsuccess = () => {
             storageAdapterInstance.updateCache(storeName, request.result);
@@ -403,9 +447,8 @@ async function bulkRemove(storeName, ids, skipSync = false) {
         }
     }
 
-    const db = await openDB();
+    const transaction = await getTransaction(storeName, 'readwrite');
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readwrite');
         const store = transaction.objectStore(storeName);
 
         ids.forEach(id => {
@@ -425,9 +468,8 @@ async function bulkRemove(storeName, ids, skipSync = false) {
  * @returns {Promise<Array>}
  */
 async function queryByIndex(storeName, indexField, keyRange) {
-    const db = await openDB();
+    const transaction = await getTransaction(storeName, 'readonly');
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readonly');
         const store = transaction.objectStore(storeName);
         
         // Check if index exists

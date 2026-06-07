@@ -79,17 +79,13 @@
                         break;
 
                     case 'online':
-                        updateUIConnectionStatus(true);
-                        if (typeof window.showNotification === 'function') {
-                            window.showNotification('Back online! Syncing changes...', 'success');
-                        }
+                    case 'connection-change':
+                        const isNowOnline = data?.online !== undefined ? data.online : (event === 'online');
+                        updateUIConnectionStatus(isNowOnline);
                         break;
 
                     case 'offline':
                         updateUIConnectionStatus(false);
-                        if (typeof window.showNotification === 'function') {
-                            window.showNotification('You are offline. Changes will sync automatically.', 'warning');
-                        }
                         break;
                 }
             });

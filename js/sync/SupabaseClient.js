@@ -224,9 +224,14 @@ class SupabaseClient {
      * @param {string} table - Table name
      * @param {Function} callback - (eventType, record) => void
      * @param {Object} options - { events: ['INSERT', 'UPDATE', 'DELETE'] }
-     * @returns {string} subscriptionId
+     * @returns {string|null} subscriptionId
      */
     async subscribe(table, callback, options = {}) {
+        if (!navigator.onLine) {
+            console.log(`[SupabaseClient] 📴 Offline: skipping subscription for ${table}`);
+            return null;
+        }
+
         this.checkInitialized();
         const { events = ['INSERT', 'UPDATE', 'DELETE'] } = options;
 
@@ -253,9 +258,14 @@ class SupabaseClient {
             if (status === 'SUBSCRIBED') {
                 console.log(`[SupabaseClient] ✅ Subscribed to ${table}`);
             } else if (status === 'CHANNEL_ERROR') {
-                console.error(`[SupabaseClient] ❌ Channel error for ${table}:`, err);
+                // Only log if still online to reduce noise
+                if (navigator.onLine) {
+                    console.error(`[SupabaseClient] ❌ Channel error for ${table}:`, err);
+                }
             } else if (status === 'TIMED_OUT') {
-                console.warn(`[SupabaseClient] ⚠️ Subscription timed out for ${table}`);
+                if (navigator.onLine) {
+                    console.warn(`[SupabaseClient] ⚠️ Subscription timed out for ${table}`);
+                }
             } else {
                 console.log(`[SupabaseClient] Subscription status for ${table}:`, status);
             }
