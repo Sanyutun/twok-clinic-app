@@ -7,7 +7,7 @@ class DataLayer {
     constructor() {
         this.initialized = false;
         this.dbName = 'TWOK_Clinic_DB';
-        this.dbVersion = 3; 
+        this.dbVersion = 4; 
         this.db = null;
         this.subscriptionsActive = false;
         
@@ -30,7 +30,7 @@ class DataLayer {
                 'createdAt', 'updatedAt'
             ],
             'doctors': [
-                'id', 'name', 'speciality', 'hospital', 'phone', 
+                'id', 'name', 'speciality', 'hospital', 'phone', 'needInstruction',
                 'createdAt', 'updatedAt'
             ],
             'appointments': [
@@ -40,14 +40,14 @@ class DataLayer {
                 'consultationTime', 'doneTime', 'postponeTime', 'createdAt', 
                 'updatedAt', 'bookedTime', 'notedTime', 'arrivalTime', 'arrivedTime',
                 'inconsultTime', 'investigationTime', 'consultStartTime',
-                'isNext', 'penaltyTurns', 'editedTime'
+                'isNext', 'penaltyTurns', 'editedTime', 'needInstruction'
             ],
             'instructions': [
                 'id', 'appointmentId', 'patientId', 'patientName', 'age', 'phone', 
                 'doctorName', 'appointmentDate', 'bookingNumber', 'generalInstruction', 
                 'returnDuration', 'returnUnit', 'nextAppointmentDate', 'followUpDoctor', 
                 'otherInstruction', 'transferHospital', 'selectedTests', 
-                'linkedLabIds', 'labTrackerId', 'createdAt', 'createdTime', 'updatedAt', 'editedTime'
+                'linkedLabIds', 'labTrackerId', 'createdAt', 'createdTime', 'updatedAt', 'editedTime', 'needInstruction', 'contacted'
             ],
             'expenses': [
                 'id', 'amount', 'category', 'remark', 'patientId', 'patientName', 
@@ -88,7 +88,7 @@ class DataLayer {
                 if (event === 'connection-change' || event === 'online') {
                     const isOnline = data?.online !== undefined ? data.online : (event === 'online');
                     if (isOnline && !this.subscriptionsActive && this.initialized) {
-                        console.log('[DataLayer] Connection restored, setting up realtime subscriptions...');
+                        TWOK_LOGGER.realtime('[DataLayer] Connection restored, setting up realtime subscriptions...');
                         this.setupRealtimeSubscriptions();
                     } else if (!isOnline) {
                         this.subscriptionsActive = false;
@@ -148,28 +148,30 @@ class DataLayer {
      */
     async init(config = {}) {
         if (this.initialized) {
-            console.log('[DataLayer] Already initialized');
+            TWOK_LOGGER.info('[DataLayer] Already initialized');
             return;
         }
 
         if (this.initializing) {
-            console.log('[DataLayer] Initialization already in progress, waiting...');
+            TWOK_LOGGER.info('[DataLayer] Initialization already in progress, waiting...');
             return this.initPromise;
         }
 
         this.initializing = true;
         this.initPromise = (async () => {
             try {
-                console.log('[DataLayer] 🔄 Initializing...');
+                TWOK_LOGGER.info('[DataLayer] 🔄 Initializing...');
 
                 // 1. Initialize IndexedDB - try to reuse existing TWOKDB if available
                 if (window.TWOKDB && typeof window.TWOKDB.openDB === 'function') {
-                    console.log('[DataLayer] Attempting to reuse existing TWOKDB connection...');
+                    TWOK_LOGGER.debug('[DataLayer] Attempting to reuse existing TWOKDB connection...');
                     try {
                         this.db = await window.TWOKDB.openDB();
-                        console.log('[DataLayer] ✅ Connected to existing TWOKDB');
+                        // TWOKDB already manages onclose/onversionchange on this connection;
+                        // do NOT overwrite those handlers here to avoid leaving TWOKDB with a stale dbInstance.
+                        TWOK_LOGGER.debug('[DataLayer] ✅ Connected to existing TWOKDB');
                     } catch (dbErr) {
-                        console.warn('[DataLayer] Could not reuse TWOKDB, opening new connection:', dbErr);
+                        TWOK_LOGGER.warn('[DataLayer] Could not reuse TWOKDB, opening new connection:', dbErr);
                         await this.initIndexedDB();
                     }
                 } else {
@@ -178,9 +180,9 @@ class DataLayer {
 
                 // 2. Initialize Supabase client if credentials provided
                 if (config.supabaseUrl && config.supabaseKey) {
-                    console.log('[DataLayer] Initializing Supabase client...');
+                    TWOK_LOGGER.info('[DataLayer] Initializing Supabase client...');
                     await window.SupabaseClient.init(config.supabaseUrl, config.supabaseKey);
-                    console.log('[DataLayer] ✅ Supabase client initialized');
+                    TWOK_LOGGER.info('[DataLayer] ✅ Supabase client initialized');
                 }
 
                 // 3. Set API URL for sync
@@ -189,25 +191,25 @@ class DataLayer {
                 }
 
                 // 4. Load initial data from IndexedDB
-                console.log('[DataLayer] Loading local data into memory...');
+                TWOK_LOGGER.info('[DataLayer] Loading local data into memory...');
                 await this.loadAllLocalData();
 
                 // 5. Setup realtime subscriptions if Supabase is available
                 if (window.SupabaseClient.initialized) {
-                    console.log('[DataLayer] Setting up realtime subscriptions...');
+                    TWOK_LOGGER.realtime('[DataLayer] Setting up realtime subscriptions...');
                     await this.setupRealtimeSubscriptions();
                 }
 
                 this.initialized = true;
                 this.initializing = false;
-                console.log('[DataLayer] ✅ DataLayer fully initialized');
+                TWOK_LOGGER.info('[DataLayer] ✅ DataLayer fully initialized');
 
                 // Expose globally
                 window.DataLayer = this;
             } catch (error) {
                 this.initializing = false;
                 this.initialized = false;
-                console.error('[DataLayer] ❌ Initialization failed:', error);
+                TWOK_LOGGER.error('[DataLayer] ❌ Initialization failed:', error);
                 // Don't re-throw to allow app to continue in offline mode
             }
         })();
@@ -221,11 +223,11 @@ class DataLayer {
     
     initIndexedDB() {
         return new Promise((resolve, reject) => {
-            console.log(`[DataLayer] Opening IndexedDB: ${this.dbName} (v${this.dbVersion})`);
+            TWOK_LOGGER.debug(`[DataLayer] Opening IndexedDB: ${this.dbName} (v${this.dbVersion})`);
             const request = indexedDB.open(this.dbName, this.dbVersion);
 
             request.onerror = () => {
-                console.error('[DataLayer] IndexedDB error:', request.error);
+                TWOK_LOGGER.error('[DataLayer] IndexedDB error:', request.error);
                 reject(request.error);
             };
 
@@ -234,32 +236,32 @@ class DataLayer {
                 
                 // Handle unexpected closing
                 this.db.onclose = () => {
-                    console.warn('[DataLayer] Database connection closed unexpectedly');
+                    TWOK_LOGGER.warn('[DataLayer] Database connection closed unexpectedly');
                     this.db = null;
                 };
 
                 // Handle version changes
                 this.db.onversionchange = () => {
-                    console.log('[DataLayer] Database version changed elsewhere, closing connection');
+                    TWOK_LOGGER.info('[DataLayer] Database version changed elsewhere, closing connection');
                     if (this.db) {
                         this.db.close();
                     }
                     this.db = null;
                 };
 
-                console.log('[DataLayer] ✅ IndexedDB opened');
+                TWOK_LOGGER.debug('[DataLayer] ✅ IndexedDB opened');
                 resolve();
             };
 
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
-                console.log('[DataLayer] 🆙 IndexedDB upgrade needed');
+                TWOK_LOGGER.debug('[DataLayer] 🆙 IndexedDB upgrade needed');
 
                 // Create object stores if they don't exist
                 this.stores.forEach(store => {
                     if (!db.objectStoreNames.contains(store)) {
                         db.createObjectStore(store, { keyPath: 'id' });
-                        console.log(`[DataLayer] Created store: ${store}`);
+                        TWOK_LOGGER.debug(`[DataLayer] Created store: ${store}`);
                     }
                 });
             };
@@ -290,7 +292,7 @@ class DataLayer {
             if (error.name === 'InvalidStateError' || 
                 error.message.includes('closing') || 
                 error.message.includes('closed')) {
-                console.warn('[DataLayer] Transaction failed due to closing connection, retrying...');
+                TWOK_LOGGER.warn('[DataLayer] Transaction failed due to closing connection, retrying...');
                 this.db = null;
                 return this.dbTransaction(storeName, mode);
             }
@@ -312,7 +314,7 @@ class DataLayer {
                 request.onerror = () => reject(request.error);
             });
         } catch (err) {
-            console.error(`[DataLayer] getAll failed for ${storeName}:`, err);
+            TWOK_LOGGER.error(`[DataLayer] getAll failed for ${storeName}:`, err);
             throw err;
         }
     }
@@ -332,7 +334,7 @@ class DataLayer {
                 request.onerror = () => reject(request.error);
             });
         } catch (err) {
-            console.error(`[DataLayer] put failed for ${storeName}:`, err);
+            TWOK_LOGGER.error(`[DataLayer] put failed for ${storeName}:`, err);
             throw err;
         }
     }
@@ -344,22 +346,22 @@ class DataLayer {
      * @returns {Promise<void>}
      */
     async delete(storeName, id) {
-        console.log(`[DataLayer] Deleting ${id} from ${storeName}`);
+        TWOK_LOGGER.debug(`[DataLayer] Deleting ${id} from ${storeName}`);
         try {
             const { store } = await this.dbTransaction(storeName, 'readwrite');
             return new Promise((resolve, reject) => {
                 const request = store.delete(id);
                 request.onsuccess = () => {
-                    console.log(`[DataLayer] ✅ Deleted ${id} from ${storeName}`);
+                    TWOK_LOGGER.debug(`[DataLayer] ✅ Deleted ${id} from ${storeName}`);
                     resolve();
                 };
                 request.onerror = () => {
-                    console.error(`[DataLayer] ❌ Failed to delete ${id} from ${storeName}:`, request.error);
+                    TWOK_LOGGER.error(`[DataLayer] ❌ Failed to delete ${id} from ${storeName}:`, request.error);
                     reject(request.error);
                 };
             });
         } catch (err) {
-            console.error(`[DataLayer] ❌ Error deleting ${id} from ${storeName}:`, err);
+            TWOK_LOGGER.error(`[DataLayer] ❌ Error deleting ${id} from ${storeName}:`, err);
             throw err;
         }
     }
@@ -384,7 +386,7 @@ class DataLayer {
                 transaction.onerror = () => reject(transaction.error);
             });
         } catch (err) {
-            console.error(`[DataLayer] bulkPut failed for ${storeName}:`, err);
+            TWOK_LOGGER.error(`[DataLayer] bulkPut failed for ${storeName}:`, err);
             throw err;
         }
     }
@@ -410,6 +412,8 @@ class DataLayer {
      * @returns {Promise<void>}
      */
     async bulkPutWithSync(storeName, records) {
+        if (!records || records.length === 0) return;
+
         try {
             // 0. Sanitize records
             const sanitizedRecords = records.map(record => this.sanitizeRecord(storeName, record));
@@ -428,24 +432,29 @@ class DataLayer {
                 window[arrayName].splice(0, window[arrayName].length, ...flattenedRecords);
             }
 
-            // 2. Queue for cloud sync
+            // 2. Queue for cloud sync using bulkQueue
             const syncManager = window.twokSyncManager || window.SyncManager;
             if (syncManager) {
-                sanitizedRecords.forEach(record => {
-                    const dbData = this.mapToDb(storeName, record);
-                    syncManager.queue({
-                        table: this.arrayNameToTable(storeName),
-                        operation: 'upsert',
-                        data: dbData,
-                        id: record.id
-                    });
-                });
-                console.log(`[DataLayer] ✅ Bulk saved locally and queued for sync: ${storeName}`);
+                const tableName = this.arrayNameToTable(storeName);
+                const syncOps = sanitizedRecords.map(record => ({
+                    table: tableName,
+                    operation: 'upsert',
+                    data: this.mapToDb(storeName, record),
+                    id: record.id
+                }));
+                
+                if (typeof syncManager.bulkQueue === 'function') {
+                    syncManager.bulkQueue(syncOps);
+                } else {
+                    // Fallback to individual queueing if bulkQueue not available
+                    syncOps.forEach(op => syncManager.queue(op));
+                }
+                TWOK_LOGGER.sync(`[DataLayer] ✅ Bulk saved locally and queued for sync: ${storeName} (${records.length} items)`);
             } else {
-                console.warn('[DataLayer] SyncManager not found, data only saved locally');
+                TWOK_LOGGER.warn('[DataLayer] SyncManager not found, data only saved locally');
             }
         } catch (error) {
-            console.error('[DataLayer] Bulk save with sync failed:', error);
+            TWOK_LOGGER.error('[DataLayer] Bulk save with sync failed:', error);
             throw error;
         }
     }
@@ -464,7 +473,7 @@ class DataLayer {
                 request.onerror = () => reject(request.error);
             });
         } catch (err) {
-            console.error(`[DataLayer] clear failed for ${storeName}:`, err);
+            TWOK_LOGGER.error(`[DataLayer] clear failed for ${storeName}:`, err);
             throw err;
         }
     }
@@ -474,7 +483,7 @@ class DataLayer {
     // ==========================================
 
     async loadAllLocalData() {
-        console.log('[DataLayer] Loading local collections...');
+        TWOK_LOGGER.debug('[DataLayer] Loading local collections...');
 
         const collections = [
             { store: 'patients', array: 'patients' },
@@ -509,9 +518,9 @@ class DataLayer {
                     window[col.array] = records;
                 }
 
-                console.log(`  - ${col.store}: ${window[col.array].length} records`);
+                TWOK_LOGGER.debug(`  - ${col.store}: ${window[col.array].length} records`);
             } catch (error) {
-                console.error(`  - ❌ Failed to load ${col.store}:`, error);
+                TWOK_LOGGER.error(`  - ❌ Failed to load ${col.store}:`, error);
                 if (!window[col.array]) window[col.array] = [];
             }
         }
@@ -555,6 +564,7 @@ class DataLayer {
             'consultStartTime': 'consult_start_time',
             'isNext': 'is_next',
             'penaltyTurns': 'penalty_turns',
+            'needInstruction': 'need_instruction',
             'returnDuration': 'return_duration',
             'returnUnit': 'return_unit',
             'nextAppointmentDate': 'next_appointment_date',
@@ -648,49 +658,38 @@ class DataLayer {
             'consultStartTime': 'consult_start_time',
             'isNext': 'is_next',
             'penaltyTurns': 'penalty_turns',
+            'needInstruction': 'need_instruction',
+            'returnDuration': 'return_duration',
+            'returnUnit': 'return_unit',
+            'nextAppointmentDate': 'next_appointment_date',
+            'followUpDoctor': 'follow_up_doctor',
+            'otherInstruction': 'other_instruction',
+            'transferHospital': 'transfer_hospital',
+            'selectedTests': 'selected_tests',
+            'linkedLabIds': 'linked_lab_ids',
+            'labTrackerId': 'linked_lab_ids',
+            'itemName': 'item_name',
+            'item_name': 'item_name',
+            'expenseType': 'expense_type',
+            'expense_type': 'expense_type',
+            'customTypeName': 'custom_type_name',
+            'custom_type_name': 'custom_type_name',
+            'customIcon': 'custom_icon',
+            'custom_icon': 'custom_icon',
+            'expenseId': 'expense_id',
+            'labName': 'lab_name',
+            'pendingTests': 'pending_tests',
             'appointmentDate': 'appointment_date',
             'generalInstruction': 'general_instruction'
         };
 
-        // Table-specific mappings
+        // Table-specific mappings (only for very specific overrides)
         const tableMappings = {
-            'doctors': {
-                'speciality': 'speciality',
-                'hospital': 'hospital',
-                'phone': 'phone'
-            },
             'specialities': {
                 'name': 'value'
             },
             'hospitals': {
                 'name': 'value'
-            },
-            'instructions': {
-                'returnDuration': 'return_duration',
-                'returnUnit': 'return_unit',
-                'nextAppointmentDate': 'next_appointment_date',
-                'followUpDoctor': 'follow_up_doctor',
-                'otherInstruction': 'other_instruction',
-                'transferHospital': 'transfer_hospital',
-                'selectedTests': 'selected_tests',
-                'linkedLabIds': 'linked_lab_ids',
-                'labTrackerId': 'linked_lab_ids'
-                },
-            'expenses': {
-                'itemName': 'item_name',
-                'item_name': 'item_name',
-                'expenseType': 'expense_type',
-                'expense_type': 'expense_type',
-                'customTypeName': 'custom_type_name',
-                'custom_type_name': 'custom_type_name',
-                'customIcon': 'custom_icon',
-                'custom_icon': 'custom_icon'
-            },
-            'lab_records': {
-                'appointmentId': 'appointment_id',
-                'expenseId': 'expense_id',
-                'labName': 'lab_name',
-                'pendingTests': 'pending_tests'
             }
         };
 
@@ -723,13 +722,14 @@ class DataLayer {
             'updated_at', 'booked_time', 'noted_time', 'arrival_time', 
             'inconsult_time', 'investigation_time', 'consult_start_time',
             'is_next', 'penalty_turns', 'edited_time', 'date_time',
-            'speciality', 'hospital', 'return_duration', 'return_unit',
+            'speciality', 'hospital', 'need_instruction', 'return_duration', 'return_unit',
             'next_appointment_date', 'follow_up_doctor', 'other_instruction',
             'transfer_hospital', 'selected_tests', 'linked_lab_ids',
             'amount', 'category', 'remark', 'note', 'item_name',
             'expense_type', 'custom_type_name', 'custom_icon', 'appointment_id',
             'expense_id', 'lab_name', 'pending_tests', 'timeline', 'address', 'is_foc', 'value',
-            'icon', 'appointment_date', 'general_instruction'
+            'icon', 'appointment_date', 'general_instruction',
+            'contacted'
         ];
 
         // Special handling for settings table updated_at mapping
@@ -750,7 +750,7 @@ class DataLayer {
                     'inconsult_time', 'investigation_time', 'consult_start_time', 
                     'edited_time', 'date_time', 'created_at', 'updated_at'
                 ];
-                const booleanFields = ['is_foc', 'is_next'];
+                const booleanFields = ['is_foc', 'is_next', 'need_instruction'];
                 const complexFields = ['selected_tests', 'pending_tests', 'timeline', 'linked_lab_ids'];
 
                 if ((numericFields.includes(field) || 
@@ -817,7 +817,7 @@ class DataLayer {
                     const idx = window[arrayName].findIndex(item => (item.id || item.labId || item.AppointmentID || item.PatientID) === id);
                     if (idx > -1) {
                         window[arrayName].splice(idx, 1);
-                        console.log(`[DataLayer] Removed ${id} from window.${arrayName} in-place`);
+                        TWOK_LOGGER.sync(`[DataLayer] Removed ${id} from window.${arrayName} in-place`);
                     }
                 }
             } else {
@@ -853,7 +853,7 @@ class DataLayer {
                     data: dbData,
                     id: id || (sanitizedData ? sanitizedData.id : null)
                 });
-                console.log(`[DataLayer] ✅ Saved locally and queued for sync: ${operation} ${table}`);
+                TWOK_LOGGER.sync(`[DataLayer] ✅ Saved locally and queued for sync: ${operation} ${table}`);
             } else {
                 console.warn('[DataLayer] SyncManager not found, data only saved locally');
             }
@@ -879,13 +879,13 @@ class DataLayer {
             'instructions', 'expenses', 'lab_records'
         ];
 
-        console.log('[DataLayer] 🚀 Starting manual push of all local data to cloud...');
+        TWOK_LOGGER.sync('[DataLayer] 🚀 Starting manual push of all local data to cloud...');
         
         for (const table of tables) {
             try {
                 const data = await this.getAll(table);
                 if (data && data.length > 0) {
-                    console.log(`[DataLayer] Queuing ${data.length} records from ${table}...`);
+                    TWOK_LOGGER.sync(`[DataLayer] Queuing ${data.length} records from ${table}...`);
                     data.forEach(record => {
                         syncManager.queue({
                             table: table,
@@ -900,7 +900,7 @@ class DataLayer {
             }
         }
         
-        console.log('[DataLayer] ✅ All data queued for sync. Watch SyncManager logs for progress.');
+        TWOK_LOGGER.sync('[DataLayer] ✅ All data queued for sync. Watch SyncManager logs for progress.');
     }
 
     // ==========================================
@@ -967,7 +967,7 @@ class DataLayer {
                     },
                     id: key
                 });
-                console.log(`[DataLayer] ✅ Setting '${key}' saved locally and queued for sync`);
+                TWOK_LOGGER.sync(`[DataLayer] ✅ Setting '${key}' saved locally and queued for sync`);
             }
         } catch (error) {
             console.error(`[DataLayer] Failed to save setting '${key}':`, error);
@@ -990,7 +990,7 @@ class DataLayer {
                 }
             });
             window.appSettings = settingsMap;
-            console.log(`[DataLayer] Loaded ${allSettings.length} settings`);
+            TWOK_LOGGER.sync(`[DataLayer] Loaded ${allSettings.length} settings`);
             return settingsMap;
         } catch (error) {
             console.error('[DataLayer] Failed to load settings:', error);
@@ -998,6 +998,22 @@ class DataLayer {
         }
     }
     
+    normalizeTableName(table) {
+        if (!table) return table;
+        
+        const mapping = {
+            'appointment': 'appointments',
+            'patient': 'patients',
+            'doctor': 'doctors',
+            'instruction': 'instructions',
+            'expense': 'expenses',
+            'lab': 'lab_records',
+            'lab_tracker': 'lab_records'
+        };
+        
+        return mapping[table] || table;
+    }
+
     tableToArrayName(table) {
         const mapping = {
             'patients': 'patients',
@@ -1032,6 +1048,104 @@ class DataLayer {
     }
 
     /**
+     * Handle data change notifications from external sources (Realtime, WebSockets)
+     * @param {string} table 
+     * @param {string} eventType - 'insert', 'update', 'delete'
+     * @param {Object} record - The record data in database format (snake_case)
+     */
+    async handleExternalChange(table, eventType, record) {
+        if (!record) return;
+
+        // Normalize table name (e.g., singular to plural from WebSockets)
+        const normalizedTable = this.normalizeTableName(table);
+
+        // Validate table exists in IndexedDB
+        if (window.TWOKDB && window.TWOKDB.STORES) {
+            const validStores = Object.values(window.TWOKDB.STORES);
+            if (!validStores.includes(normalizedTable)) {
+                console.warn(`[DataLayer] ⚠️ Skipping external change for unknown table: ${table} (normalized: ${normalizedTable})`);
+                return;
+            }
+        }
+        
+        const id = record.id || record.PatientID || record.DoctorID || record.AppointmentID || 
+                   record.InstructionID || record.ExpenseID || record.LabID || record.labId ||
+                   record.appointment_id || record.patient_id || record.doctor_id ||
+                   record.instruction_id || record.expense_id || record.lab_id;
+                   
+        if (!id && eventType === 'delete') {
+            console.warn(`[DataLayer] ⚠️ Cannot process ${eventType} on ${normalizedTable}: missing ID`, record);
+            return;
+        }
+
+        TWOK_LOGGER.sync(`[DataLayer] Processing external change: ${eventType} on ${normalizedTable}`, record);
+
+        // Map from DB format to Frontend format if it's not a delete
+        const frontendRecord = eventType === 'delete' ? record : this.mapFromDb(normalizedTable, record);
+        
+        // Ensure id is present for IndexedDB keyPath ('id')
+        if (frontendRecord && !frontendRecord.id && id) {
+            frontendRecord.id = id;
+        }
+        
+        const recordId = id || (frontendRecord ? frontendRecord.id : null);
+
+        // 1. Update local IndexedDB
+        try {
+            if (eventType === 'delete') {
+                if (window.TWOKDB && typeof window.TWOKDB.remove === 'function') {
+                    await window.TWOKDB.remove(normalizedTable, recordId, true);
+                } else {
+                    await this.delete(normalizedTable, recordId);
+                }
+            } else {
+                // Deduplicate: If we already have this exact update pending in our queue, don't overwrite
+                const manager = window.twokSyncManager || window.SyncManager;
+                if (manager && manager.isPending(normalizedTable, recordId)) {
+                    TWOK_LOGGER.sync(`[DataLayer] 🛡️ Skipping update for ${normalizedTable}:${recordId} (local change pending)`);
+                    return;
+                }
+
+                if (window.TWOKDB && typeof window.TWOKDB.put === 'function') {
+                    await window.TWOKDB.put(normalizedTable, frontendRecord, true);
+                } else {
+                    await this.put(normalizedTable, frontendRecord);
+                }
+            }
+        } catch (err) {
+            console.error(`[DataLayer] Failed to update IndexedDB from external change:`, err);
+        }
+
+        // 2. Update global memory arrays
+        const arrayName = this.tableToArrayName(normalizedTable);
+        if (window[arrayName]) {
+            const flattenedRecord = this.flattenRecordIfNeeded(normalizedTable, frontendRecord);
+            const index = window[arrayName].findIndex(item => {
+                if (typeof item === 'string') return item == recordId;
+                const itemId = item.id || item.labId || item.value || 
+                             item.ExpenseID || item.PatientID || item.DoctorID || 
+                             item.AppointmentID || item.InstructionID || item.LabID;
+                return itemId == recordId;
+            });
+
+            if (eventType === 'delete') {
+                if (index >= 0) window[arrayName].splice(index, 1);
+            } else {
+                if (index >= 0) {
+                    window[arrayName][index] = flattenedRecord;
+                } else {
+                    window[arrayName].push(flattenedRecord);
+                }
+            }
+        }
+
+        // 3. Dispatch global event to notify UI components
+        window.dispatchEvent(new CustomEvent('twok_data_changed', {
+            detail: { table: normalizedTable, eventType, record: frontendRecord }
+        }));
+    }
+
+    /**
      * Set up realtime subscriptions for all tables
      */
     async setupRealtimeSubscriptions() {
@@ -1041,85 +1155,39 @@ class DataLayer {
         }
 
         if (!navigator.onLine) {
-            console.log('[DataLayer] 📴 Offline: skipping realtime setup');
+            TWOK_LOGGER.sync('[DataLayer] 📴 Offline: skipping realtime setup');
             return;
         }
 
+        // 0. Clean up existing subscriptions to avoid duplicates
+        try {
+            await window.SupabaseClient.unsubscribeAll();
+        } catch (e) {
+            console.warn('[DataLayer] Unsubscribe all failed:', e);
+        }
+
+        // FIX: Only subscribe to tables that change frequently during clinic operations.
+        // Static/lookup tables (addresses, specialities, hospitals, expense_categories, settings)
+        // are excluded — they almost never change in real-time and each subscription
+        // costs a persistent WebSocket channel. Reduced from 11 → 6 channels.
         const tables = [
-            'patients', 'doctors', 'appointments', 'instructions', 
-            'expenses', 'lab_records', 'settings',
-            'addresses', 'specialities', 'hospitals', 'expense_categories'
+            'appointments',   // HIGH: changes constantly during clinic
+            'patients',       // MEDIUM: new patients added regularly
+            'doctors',        // LOW-MEDIUM: doctor info updates
+            'instructions',   // MEDIUM: created after each consultation
+            'expenses',       // MEDIUM: added throughout the day
+            'lab_records',    // MEDIUM: updated as lab results come in
         ];
 
         this.subscriptionsActive = true;
 
         for (const table of tables) {
-            console.log(`[DataLayer] Subscribing to realtime changes for ${table}...`);
+            TWOK_LOGGER.sync(`[DataLayer] Subscribing to realtime changes for ${table}...`);
             
             await window.SupabaseClient.subscribe(table, async (eventType, record) => {
-                console.log(`[DataLayer] Realtime update: ${eventType} on ${table}`, record);
-
-                // Map from DB format to Frontend format
-                const frontendRecord = eventType === 'delete' ? record : this.mapFromDb(table, record);
-
-                // 1. Update local IndexedDB (prefer TWOKDB to keep cache in sync)
-                if (eventType === 'delete') {
-                    if (window.TWOKDB && typeof window.TWOKDB.remove === 'function') {
-                        await window.TWOKDB.remove(table, record.id, true);
-                    } else {
-                        await this.delete(table, record.id);
-                    }
-                } else {
-                    if (window.TWOKDB && typeof window.TWOKDB.put === 'function') {
-                        await window.TWOKDB.put(table, frontendRecord, true);
-                    } else {
-                        await this.put(table, frontendRecord);
-                    }
-                }
-
-                // 2. Update global arrays
-                const arrayName = this.tableToArrayName(table);
-                if (window[arrayName]) {
-                    const flattenedRecord = this.flattenRecordIfNeeded(table, frontendRecord);
-                    const index = window[arrayName].findIndex(item => {
-                        if (typeof item === 'string') return item == (record.id || frontendRecord.id);
-                        
-                        // Robust ID matching: check all possible ID fields (modern and legacy)
-                        const itemId = item.id || item.labId || item.value || 
-                                     item.ExpenseID || item.PatientID || item.DoctorID || 
-                                     item.AppointmentID || item.InstructionID || item.LabID;
-                        
-                        const incomingId = record.id || record.labId || frontendRecord.id;
-                        
-                        return itemId == incomingId; // Use loose equality for safety
-                    });
-
-                    console.log(`[DataLayer] Realtime ${eventType} on ${table}: index found=${index}`);
-
-                    if (eventType === 'delete') {
-                        if (index >= 0) {
-                            window[arrayName].splice(index, 1);
-                            console.log(`[DataLayer] Realtime delete: Removed ${record.id} from window.${arrayName} in-place`);
-                        } else {
-                            console.warn(`[DataLayer] Realtime delete: Could not find ${record.id} in window.${arrayName}`);
-                        }
-                    } else {
-                        if (index >= 0) {
-                            window[arrayName][index] = flattenedRecord;
-                        } else {
-                            window[arrayName].push(flattenedRecord);
-                        }
-                    }
-                }
-
-                // 3. Dispatch global event to notify UI components
-                window.dispatchEvent(new CustomEvent('twok_data_changed', {
-                    detail: { 
-                        table: table, 
-                        eventType: eventType, 
-                        record: frontendRecord 
-                    }
-                }));
+                // Map event type names if necessary
+                const mappedEvent = eventType === 'insert' ? 'insert' : (eventType === 'update' ? 'update' : (eventType === 'delete' ? 'delete' : eventType));
+                await this.handleExternalChange(table, mappedEvent, record);
             });
         }
     }
@@ -1149,7 +1217,7 @@ class DataLayer {
      * Manual sync: Pull changes from Supabase AND push queued ops
      */
     async syncFromSupabase(silent = false) {
-        console.log('[DataLayer] Starting manual sync...');
+        TWOK_LOGGER.sync('[DataLayer] Starting manual sync...');
 
         if (!window.SupabaseClient || !window.SupabaseClient.initialized || !window.SupabaseClient.client) {
             console.error('[DataLayer] Cannot sync: Supabase client is not initialized');
@@ -1161,9 +1229,9 @@ class DataLayer {
             // 1. Try to flush pending queue first (PUSH)
             const syncManager = window.twokSyncManager || window.SyncManager;
             if (syncManager && syncManager.getQueueLength() > 0) {
-                console.log(`[DataLayer] Pushing ${syncManager.getQueueLength()} pending operations...`);
+                TWOK_LOGGER.sync(`[DataLayer] Pushing ${syncManager.getQueueLength()} pending operations...`);
                 await syncManager.flushQueue();
-                console.log('[DataLayer] Pending operations pushed successfully');
+                TWOK_LOGGER.sync('[DataLayer] Pending operations pushed successfully');
             }
 
             // 2. Fetch recent changes (PULL)
@@ -1173,7 +1241,7 @@ class DataLayer {
             ];
             
             for (const table of tables) {
-                if (!silent) console.log(`[DataLayer] Syncing ${table}...`);
+                if (!silent) TWOK_LOGGER.sync(`[DataLayer] Syncing ${table}...`);
 
                 // A. Get all IDs from Supabase
                 const { data: allSupabaseRecords, error: fetchError } = await window.SupabaseClient.client
@@ -1200,20 +1268,28 @@ class DataLayer {
                             break;
                         }
 
-                        console.log(`[DataLayer] Deleting orphan record from ${table}: ${localRecord.id}`);
+                        TWOK_LOGGER.sync(`[DataLayer] Deleting orphan record from ${table}: ${localRecord.id}`);
                         await this.delete(table, localRecord.id);
                         deleteCount++;
                     }
                 }
                 
                 if (deleteCount > 0 && !silent) {
-                    console.log(`[DataLayer] Cleaned up ${deleteCount} orphan records from ${table}`);
+                    TWOK_LOGGER.sync(`[DataLayer] Cleaned up ${deleteCount} orphan records from ${table}`);
                 }
                 
                 // D. Fetch records that were updated since last sync
                 const forceFullSync = ['addresses', 'specialities', 'hospitals', 'expense_categories'].includes(table);
-                const lastSync = forceFullSync ? null : localStorage.getItem(`last_sync_timestamp_${table}`);
+                // Get the last sync timestamp for THIS table
+                let lastSync = forceFullSync ? null : localStorage.getItem(`last_sync_timestamp_${table}`);
                 
+                // If we have a timestamp, subtract 10 seconds for safety/buffer
+                if (lastSync) {
+                    const date = new Date(lastSync);
+                    date.setSeconds(date.getSeconds() - 10);
+                    lastSync = date.toISOString();
+                }
+
                 const queryOptions = lastSync ? {
                     updated_at: { operator: 'gt', value: lastSync }
                 } : {};
@@ -1221,29 +1297,27 @@ class DataLayer {
                 const recentData = await window.SupabaseClient.query(table, queryOptions);
 
                 if (recentData && recentData.length > 0) {
-                    if (!silent) console.log(`[DataLayer] Found ${recentData.length} records for ${table}`);
+                    if (!silent) TWOK_LOGGER.sync(`[DataLayer] Found ${recentData.length} new/updated records for ${table}`);
                     
                     const localData = recentData.map(record => this.mapFromDb(table, record));
                     await this.bulkPut(table, localData);
-                    
-                    // Update sync timestamp
-                    localStorage.setItem(`last_sync_timestamp_${table}`, new Date().toISOString());
-                } else if (!lastSync) {
-                    localStorage.setItem(`last_sync_timestamp_${table}`, new Date().toISOString());
                 }
+                
+                // Update sync timestamp ONLY after successful fetch
+                localStorage.setItem(`last_sync_timestamp_${table}`, new Date().toISOString());
             }
 
             // 3. REFRESH MEMORY ARRAYS (Very important to avoid page reload)
             await this.loadAllLocalData();
 
-            if (!silent) showNotification('Sync complete!', 'success');
+            if (!silent && window.showNotification) window.showNotification('Sync complete!', 'success');
             
             // 4. Trigger global sync complete event (UI components listen for this)
             window.dispatchEvent(new CustomEvent('twok_sync_complete'));
 
         } catch (error) {
             console.error('[DataLayer] Sync failed:', error);
-            if (!silent) showNotification('Sync error: ' + error.message, 'error');
+            if (!silent && window.showNotification) window.showNotification('Sync error: ' + error.message, 'error');
             throw error;
         }
     }

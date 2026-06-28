@@ -25,6 +25,12 @@ const VIP_RESERVED_NUMBERS_DEFAULT = [1, 2, 5, 8, 12, 14, 18];
 const MAX_BOOKING_NUMBER = 50;
 const TARGET_DOCTOR_NAME = 'Dr. Soe Chan Myae'; // Booking numbers only for this doctor
 
+const PENALTY_TURNS_DEFAULT = 3;
+const WAITING_TURNS_DEFAULT = 3;
+
+let penaltyTurnsSetting = PENALTY_TURNS_DEFAULT;
+let waitingTurnsSetting = WAITING_TURNS_DEFAULT;
+
 // Default appointment times by day of week (0=Sunday, 1=Monday, ..., 6=Saturday)
 // null means doctor doesn't work on that day
 const DEFAULT_APPOINTMENT_TIMES_DEFAULT = {
@@ -72,12 +78,25 @@ const WS_PROTOCOL = typeof window !== 'undefined' && window.location.protocol ==
 const WS_HOST = typeof window !== 'undefined' ? window.location.host : 'localhost:3000';
 const WS_URL = `${WS_PROTOCOL}//${WS_HOST}`;
 const WS_RECONNECT_DELAY = 3000; // 3 seconds
+
 // Use a persistent client ID for this session to avoid redundant reloads from self
-let myClientId = sessionStorage.getItem('twok_client_id');
+// Changed from sessionStorage to localStorage for better persistence
+let myClientId = localStorage.getItem('twok_client_id');
 if (!myClientId) {
     myClientId = Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
-    sessionStorage.setItem('twok_client_id', myClientId);
+    localStorage.setItem('twok_client_id', myClientId);
 }
+window.myClientId = myClientId;
+
+// Persistent device ID for unique ID generation across devices
+let deviceId = localStorage.getItem('twok_device_id');
+if (!deviceId) {
+    // 4-character random alphanumeric suffix is enough for uniqueness when combined with sequential numbers/timestamps
+    deviceId = Math.random().toString(36).substring(2, 6).toUpperCase();
+    localStorage.setItem('twok_device_id', deviceId);
+}
+window.deviceId = deviceId; // Expose globally for components
+
 let ws = null;
 let wsReconnectTimer = null;
 
@@ -123,7 +142,7 @@ function initWebSocket() {
         ws = new WebSocket(WS_URL);
 
         ws.onopen = () => {
-            console.log('WebSocket connected to TV display');
+            TWOK_LOGGER.info('WebSocket connected to TV display');
             if (wsReconnectTimer) {
                 clearTimeout(wsReconnectTimer);
                 wsReconnectTimer = null;
@@ -131,48 +150,50 @@ function initWebSocket() {
         };
 
         ws.onclose = () => {
-            console.log('WebSocket disconnected, will reconnect...');
+            TWOK_LOGGER.info('WebSocket disconnected, will reconnect...');
             wsReconnectTimer = setTimeout(initWebSocket, WS_RECONNECT_DELAY);
         };
 
         ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
+            TWOK_LOGGER.error('WebSocket error:', error);
         };
 
         ws.onmessage = (event) => {
             // Handle messages from server (if needed)
             const data = JSON.parse(event.data);
-            console.log('[WS] Received message:', data.type);
+            TWOK_LOGGER.debug('[WS] Received message:', data.type);
             
             if (data.type === 'connection_ack') {
-                console.log('WebSocket connection acknowledged. Client ID:', data.clientId);
+                TWOK_LOGGER.info('WebSocket connection acknowledged. Client ID:', data.clientId);
                 // We keep our local persistent myClientId instead of using the server-provided one
                 // to ensure consistent senderId matching across reloads
             }
 
             // Ignore messages sent by this client to avoid redundant reloads and race conditions
             if (data.data && data.data.senderId == myClientId) {
-                console.log('[WS] Ignoring message from self');
+                TWOK_LOGGER.debug('[WS] Ignoring message from self');
                 return;
             }
             
             // Handle appointment changes and refresh data
-            if (data.type === 'appointment_updated' || 
+            // DISABLED when CLOUD_SYNC is active to avoid redundant re-renders
+            const isCloudSync = window.TWOK_CONFIG && window.TWOK_CONFIG.FEATURES.CLOUD_SYNC;
+            if (!isCloudSync && (data.type === 'appointment_updated' || 
                 data.type === 'appointment_created' || 
                 data.type === 'appointment_deleted' ||
                 data.type === 'patient_arrived' ||
                 data.type === 'consultation_started' ||
                 data.type === 'consultation_finished' ||
                 data.type === 'queue_update' ||
-                data.type === 'sync_complete') {
-                console.log('[WS] Appointment changed, reloading data...');
+                data.type === 'sync_complete')) {
+                TWOK_LOGGER.info('[WS] Appointment changed, reloading data...');
                 // Reload appointments from IndexedDB
                 loadFromStorage().then(() => {
                     renderAppointmentTable();
                     updateQueueSummary();
                     showNotification('Data updated from another device', 'info');
                 }).catch(err => {
-                    console.error('[WS] Error reloading data:', err);
+                    TWOK_LOGGER.error('[WS] Error reloading data:', err);
                 });
             }
         };
@@ -223,6 +244,7 @@ const elements = {
     expenseSection: document.getElementById('expenseSection'),
     labTrackerSection: document.getElementById('labTrackerSection'),
     pharmacistSection: document.getElementById('pharmacistSection'),
+    todoSection: document.getElementById('todoSection'),
     settingsSection: document.getElementById('settingsSection'),
     headerSubtitle: document.getElementById('headerSubtitle'),
 
@@ -243,6 +265,7 @@ const elements = {
     patientEditIndex: document.getElementById('patientEditIndex'),
     patientId: document.getElementById('patientId'),
     patientName: document.getElementById('patientName'),
+    patientRegisterAutocomplete: document.getElementById('patientRegisterAutocomplete'),
     patientAge: document.getElementById('patientAge'),
     patientSex: document.getElementById('patientSex'),
     patientAddress: document.getElementById('patientAddress'),
@@ -292,6 +315,7 @@ const elements = {
     doctorPhone: document.getElementById('doctorPhone'),
     doctorCopyPhoneBtn: document.getElementById('doctorCopyPhoneBtn'),
     doctorCopyTooltip: document.getElementById('doctorCopyTooltip'),
+    doctorNeedInstruction: document.getElementById('doctorNeedInstruction'),
     doctorSaveBtn: document.getElementById('doctorSaveBtn'),
     doctorSaveBtnText: document.getElementById('doctorSaveBtnText'),
     doctorDeleteBtn: document.getElementById('doctorDeleteBtn'),
@@ -359,6 +383,7 @@ const elements = {
     selectedPatientName: document.getElementById('selectedPatientName'),
     currentConsultName: document.getElementById('currentConsultName'),
     nextPatientBtn: document.getElementById('nextPatientBtn'),
+    undoAppointmentBtn: document.getElementById('undoAppointmentBtn'),
 
     // Notification
     notification: document.getElementById('notification'),
@@ -577,8 +602,10 @@ let expenseCategories = [];
 let labRecords = [];
 let labNames = ['TWOK', 'NN', 'YN', 'BH'];
 
+let currentSection = 'patient'; // Track current active section
+
 // Pagination State
-const ITEMS_PER_PAGE = 10;
+const ITEMS_PER_PAGE = 25; // Optimized for performance
 let patientCurrentPage = 1;
 let doctorCurrentPage = 1;
 let appointmentCurrentPage = 1;
@@ -733,8 +760,148 @@ let appointmentIsEditing = false;
 let doctorCurrentSort = { field: null, direction: 'asc' };
 let appointmentCurrentSort = { field: null, direction: 'asc' };
 let patientAutocompleteHighlighted = -1;
+let patientRegisterAutocompleteHighlighted = -1;
 let doctorAutocompleteHighlighted = -1;
 let labPatientAutocompleteHighlighted = -1;
+
+// Appointment Action History for Undo (Ctrl+Z)
+const appointmentActionHistory = [];
+const MAX_UNDO_STEPS = 5; // Support up to 5 steps just in case, user asked for 3
+
+// ... (rest of state variables)
+
+// ==================== UNDO SYSTEM ====================
+/**
+ * Push current appointment state to history before modification
+ */
+function pushToUndoHistory(appointmentId) {
+    const appointment = appointments.find(a => a.id === appointmentId);
+    if (!appointment) return;
+
+    // Create a deep copy of the current state
+    const historyItem = {
+        timestamp: Date.now(),
+        data: JSON.parse(JSON.stringify(appointment))
+    };
+
+    appointmentActionHistory.push(historyItem);
+
+    // Keep only the last MAX_UNDO_STEPS
+    if (appointmentActionHistory.length > MAX_UNDO_STEPS) {
+        appointmentActionHistory.shift();
+    }
+
+    // Update UI button visibility
+    updateUndoButtonVisibility();
+    
+    TWOK_LOGGER.debug(`[Undo] Pushed history for #${appointment.bookingNumber} ${appointment.patientName}. Total history: ${appointmentActionHistory.length}`);
+}
+
+/**
+ * Update the Undo button visibility based on history stack
+ */
+function updateUndoButtonVisibility() {
+    if (elements.undoAppointmentBtn) {
+        if (appointmentActionHistory.length > 0) {
+            elements.undoAppointmentBtn.style.display = 'inline-flex';
+        } else {
+            elements.undoAppointmentBtn.style.display = 'none';
+        }
+    }
+}
+
+/**
+ * Undo the last appointment action
+ */
+async function undoLastAppointmentAction() {
+    if (appointmentActionHistory.length === 0) return;
+
+    const lastAction = appointmentActionHistory.pop();
+    const previousData = lastAction.data;
+
+    // Find the current appointment and restore its data
+    const index = appointments.findIndex(a => a.id === previousData.id);
+    if (index === -1) {
+        showNotification('Cannot undo: Appointment no longer exists', 'error');
+        updateUndoButtonVisibility();
+        return;
+    }
+
+    const currentData = appointments[index];
+    TWOK_LOGGER.info(`[Undo] Reverting #${currentData.bookingNumber} from ${currentData.status} back to ${previousData.status}`);
+
+    // Restore data
+    appointments[index] = JSON.parse(JSON.stringify(previousData));
+
+    // Save and re-render
+    await saveAppointmentsToStorage(previousData.id);
+    renderAppointmentTable();
+    updateQueueSummary();
+    updateUndoButtonVisibility();
+
+    showNotification(`Undo successful: #${previousData.bookingNumber} ${previousData.patientName} reverted to ${previousData.status}`, 'success');
+
+    // Broadcast update to TV display
+    sendQueueEvent('appointment_updated', {
+        appointmentId: previousData.id,
+        bookingNumber: previousData.bookingNumber,
+        patientName: previousData.patientName,
+        status: previousData.status,
+        doctorName: previousData.doctorName
+    });
+}
+
+
+// ... (rest of state variables)
+
+// ==================== PATIENT AUTOCOMPLETE (REGISTRATION) ====================
+function showPatientRegisterAutocomplete(searchTerm) {
+    if (!searchTerm || searchTerm.length < 1) {
+        elements.patientRegisterAutocomplete.classList.add('hidden');
+        return;
+    }
+
+    const term = searchTerm.toLowerCase();
+    const matches = patients.filter(p => (p.name || '').toLowerCase().includes(term)).slice(0, 10);
+
+    if (matches.length === 0) {
+        elements.patientRegisterAutocomplete.classList.add('hidden');
+        return;
+    }
+
+    elements.patientRegisterAutocomplete.innerHTML = matches.map((p, idx) => `
+        <div class="autocomplete-item" data-index="${idx}" data-id="${p.id}">
+            <div class="autocomplete-item-primary">${escapeHtml(p.name)}</div>
+            <div class="autocomplete-item-secondary">${escapeHtml(p.age)} — ${escapeHtml(p.phone)} — ${escapeHtml(p.address)}</div>
+        </div>
+    `).join('');
+
+    elements.patientRegisterAutocomplete.classList.remove('hidden');
+    positionAutocomplete(elements.patientRegisterAutocomplete, elements.patientRegisterAutocomplete.parentElement);
+
+    // Add click handlers
+    elements.patientRegisterAutocomplete.querySelectorAll('.autocomplete-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const id = item.dataset.id;
+            if (id) {
+                selectPatientForRegistration(id);
+            }
+        });
+    });
+}
+
+function selectPatientForRegistration(patientId) {
+    const patient = patients.find(p => p.id === patientId);
+    if (!patient) return;
+
+    elements.patientRegisterAutocomplete.classList.add('hidden');
+    
+    // Ask for confirmation to load existing patient
+    if (confirm(`Patient "${patient.name}" already exists. Do you want to load their information for editing?`)) {
+        loadPatientToForm(patientId);
+    }
+}
+
 
 // VIP Slot Selection State
 let vipSlotPendingData = null; // Stores pending appointment data while selecting slot
@@ -785,6 +952,9 @@ async function init() {
     } else {
         vipReservedNumbers = [...VIP_RESERVED_NUMBERS_DEFAULT];
     }
+    
+    // Load Queue settings from localStorage
+    loadQueueSettings();
     
     renderAddressList();
     renderSpecialityList();
@@ -900,41 +1070,49 @@ function scheduleDailyStatusUpdate() {
 async function loadFromStorage() {
     // Load patients
     patients = await TWOKDB.getAll(TWOKDB.STORES.PATIENTS);
-    window.patients = patients; // Expose globally for autocomplete
+    window.patients = patients;
 
     // Load addresses (stored as objects, extract values)
     const addressesData = await TWOKDB.getAll(TWOKDB.STORES.ADDRESSES);
     addresses = addressesData.map(item => typeof item === 'string' ? item : (item.value || item.id));
+    window.addresses = addresses;
     if (addresses.length === 0) {
         addresses = ['Yangon', 'Mandalay', 'Nay Pyi Taw', 'Bago', 'Mawlamyine'];
+        window.addresses = addresses;
         await saveAddressesToStorage();
     }
 
     // Load doctors
     doctors = await TWOKDB.getAll(TWOKDB.STORES.DOCTORS);
-    window.doctors = doctors; // Expose globally for autocomplete
+    window.doctors = doctors;
 
     // Load specialities (stored as objects, extract values)
     const specialitiesData = await TWOKDB.getAll(TWOKDB.STORES.SPECIALITIES);
     specialities = specialitiesData.map(item => typeof item === 'string' ? item : (item.value || item.name || item.id));
+    window.specialities = specialities;
     if (specialities.length === 0) {
         specialities = ['General Practitioner', 'Cardiologist', 'Paediatrician', 'Orthopaedic', 'Dermatologist', 'Neurologist'];
+        window.specialities = specialities;
         await saveSpecialitiesToStorage();
     }
 
     // Load hospitals (stored as objects, extract values)
     const hospitalsData = await TWOKDB.getAll(TWOKDB.STORES.HOSPITALS);
     hospitals = hospitalsData.map(item => typeof item === 'string' ? item : (item.value || item.name || item.id));
+    window.hospitals = hospitals;
     if (hospitals.length === 0) {
         hospitals = ['Yangon General Hospital', 'SSC Hospital', 'Asia Royal Hospital', 'Pun Hlaing Hospital', 'Bahosi Hospital'];
+        window.hospitals = hospitals;
         await saveHospitalsToStorage();
     }
 
     // Load appointments
     appointments = await TWOKDB.getAll(TWOKDB.STORES.APPOINTMENTS);
+    window.appointments = appointments;
 
     // Load instructions
     instructions = await TWOKDB.getAll(TWOKDB.STORES.INSTRUCTIONS);
+    window.instructions = instructions;
 
     // Load expenses
     expenses = await TWOKDB.getAll(TWOKDB.STORES.EXPENSES);
@@ -942,7 +1120,8 @@ async function loadFromStorage() {
 
     // Load lab tracker
     labRecords = await TWOKDB.getAll(TWOKDB.STORES.LAB_TRACKER);
-
+    window.labRecords = labRecords;
+    
     // Load expense categories (stored as objects, extract values)
     await loadExpenseCategories();
 
@@ -964,6 +1143,7 @@ async function loadExpenseCategories() {
         expenseCategories = [...DEFAULT_EXPENSE_CATEGORIES];
         await saveExpenseCategories();
     }
+    window.expenseCategories = expenseCategories;
 }
 
 /**
@@ -1103,6 +1283,7 @@ function showNonWorkingDayWarning(dayOfWeek) {
 async function updateNotedToBookedStatus() {
     const now = new Date();
     let updated = false;
+    const updatedIds = [];
 
     appointments.forEach(appt => {
         // Only process Dr. Soe Chan Myae appointments
@@ -1118,12 +1299,13 @@ async function updateNotedToBookedStatus() {
             appt.bookedTime = toLocalISOString(now);
             appt.autoBooked = true;
             updated = true;
+            updatedIds.push(appt.id);
             console.log(`Auto-booking appointment for ${appt.patientName} on ${appt.appointmentTime}`);
         }
     });
 
     if (updated) {
-        await saveAppointmentsToStorage();
+        await saveAppointmentsToStorage(updatedIds);
         renderAppointmentTable();
         updateQueueSummary();
         showNotification('Appointments auto-updated to Booked');
@@ -1159,8 +1341,29 @@ async function saveHospitalsToStorage() {
     await TWOKDB.bulkPut(TWOKDB.STORES.HOSPITALS, hospitalObjects);
 }
 
-async function saveAppointmentsToStorage() {
-    await TWOKDB.bulkPut(TWOKDB.STORES.APPOINTMENTS, appointments);
+async function saveAppointmentsToStorage(appointmentIdOrIds = null) {
+    if (appointmentIdOrIds) {
+        if (Array.isArray(appointmentIdOrIds)) {
+            // Multiple surgical updates
+            const updatedAppts = appointments.filter(a => appointmentIdOrIds.includes(a.id));
+            if (updatedAppts.length > 0) {
+                await TWOKDB.bulkPut(TWOKDB.STORES.APPOINTMENTS, updatedAppts);
+                TWOK_LOGGER.debug(`[Storage] Surgically saved ${updatedAppts.length} appointments`);
+            }
+        } else {
+            // Single surgical update
+            const appt = appointments.find(a => a.id === appointmentIdOrIds);
+            if (appt) {
+                await TWOKDB.put(TWOKDB.STORES.APPOINTMENTS, appt);
+                TWOK_LOGGER.debug(`[Storage] Surgically saved appointment: ${appointmentIdOrIds}`);
+            }
+        }
+    } else {
+        // Fallback: save entire collection (use sparingly)
+        await TWOKDB.bulkPut(TWOKDB.STORES.APPOINTMENTS, appointments);
+        TWOK_LOGGER.debug(`[Storage] Bulk saved all ${appointments.length} appointments`);
+    }
+    
     // Refresh doctor filter to include new appointment doctors
     renderDoctorFilter();
     // Refresh pharmacist corner if visible
@@ -1169,16 +1372,44 @@ async function saveAppointmentsToStorage() {
     }
 }
 
-async function saveInstructionsToStorage() {
-    await TWOKDB.bulkPut(TWOKDB.STORES.INSTRUCTIONS, instructions);
+async function saveInstructionsToStorage(instructionIdOrIds = null) {
+    if (instructionIdOrIds) {
+        if (Array.isArray(instructionIdOrIds)) {
+            const updatedIns = instructions.filter(i => instructionIdOrIds.includes(i.id));
+            if (updatedIns.length > 0) {
+                await TWOKDB.bulkPut(TWOKDB.STORES.INSTRUCTIONS, updatedIns);
+            }
+        } else {
+            const ins = instructions.find(i => i.id === instructionIdOrIds);
+            if (ins) {
+                await TWOKDB.put(TWOKDB.STORES.INSTRUCTIONS, ins);
+            }
+        }
+    } else {
+        await TWOKDB.bulkPut(TWOKDB.STORES.INSTRUCTIONS, instructions);
+    }
     // Refresh pharmacist corner if visible
     if (!elements.pharmacistSection.classList.contains('hidden')) {
         renderPharmacistCorner();
     }
 }
 
-async function saveExpensesToStorage() {
-    await TWOKDB.bulkPut(TWOKDB.STORES.EXPENSES, expenses);
+async function saveExpensesToStorage(expenseIdOrIds = null) {
+    if (expenseIdOrIds) {
+        if (Array.isArray(expenseIdOrIds)) {
+            const updatedExp = expenses.filter(e => expenseIdOrIds.includes(e.id));
+            if (updatedExp.length > 0) {
+                await TWOKDB.bulkPut(TWOKDB.STORES.EXPENSES, updatedExp);
+            }
+        } else {
+            const exp = expenses.find(e => e.id === expenseIdOrIds);
+            if (exp) {
+                await TWOKDB.put(TWOKDB.STORES.EXPENSES, exp);
+            }
+        }
+    } else {
+        await TWOKDB.bulkPut(TWOKDB.STORES.EXPENSES, expenses);
+    }
     window.expenses = expenses; // Keep global reference updated
     // Refresh pharmacist corner if visible
     if (!elements.pharmacistSection.classList.contains('hidden')) {
@@ -1186,8 +1417,22 @@ async function saveExpensesToStorage() {
     }
 }
 
-async function saveLabRecordsToStorage() {
-    await TWOKDB.bulkPut(TWOKDB.STORES.LAB_TRACKER, labRecords);
+async function saveLabRecordsToStorage(labIdOrIds = null) {
+    if (labIdOrIds) {
+        if (Array.isArray(labIdOrIds)) {
+            const updatedLabs = labRecords.filter(l => l.id === labIdOrIds || (l.labId && labIdOrIds.includes(l.labId)));
+            if (updatedLabs.length > 0) {
+                await TWOKDB.bulkPut(TWOKDB.STORES.LAB_TRACKER, updatedLabs);
+            }
+        } else {
+            const lab = labRecords.find(l => l.id === labIdOrIds || l.labId === labIdOrIds);
+            if (lab) {
+                await TWOKDB.put(TWOKDB.STORES.LAB_TRACKER, lab);
+            }
+        }
+    } else {
+        await TWOKDB.bulkPut(TWOKDB.STORES.LAB_TRACKER, labRecords);
+    }
 }
 
 /**
@@ -1198,7 +1443,7 @@ async function reloadLabTracker() {
     try {
         labRecords = await TWOKDB.getAll(TWOKDB.STORES.LAB_TRACKER);
         window.labRecords = labRecords; // Also expose globally
-        console.log(`[LabTracker] Reloaded ${labRecords.length} lab records from storage`);
+        TWOK_LOGGER.debug(`[LabTracker] Reloaded ${labRecords.length} lab records from storage`);
         if (typeof renderLabTracker === 'function') {
             renderLabTracker();
         }
@@ -1217,8 +1462,17 @@ async function reloadLabTracker() {
 // Expose globally for expense-form.js
 window.reloadLabTracker = reloadLabTracker;
 
+// Periodic refresh of appointment table to update wait times
+setInterval(() => {
+    if (currentSection === 'appointment') {
+        renderAppointmentTable();
+    }
+}, 60000);
+
 // ==================== NAVIGATION ====================
+
 function switchSection(sectionName) {
+    currentSection = sectionName;
     // Update sections visibility
     elements.patientSection.classList.add('hidden');
     elements.doctorSection.classList.add('hidden');
@@ -1228,6 +1482,7 @@ function switchSection(sectionName) {
     elements.expenseSection.classList.add('hidden');
     elements.labTrackerSection.classList.add('hidden');
     elements.pharmacistSection.classList.add('hidden');
+    elements.todoSection.classList.add('hidden');
     elements.settingsSection.classList.add('hidden');
 
     if (sectionName === 'patient') {
@@ -1264,6 +1519,12 @@ function switchSection(sectionName) {
         elements.headerSubtitle.textContent = 'Lab Tracking System';
         renderLabTracker();
         updatePendingResultsAlert();
+    } else if (sectionName === 'todo') {
+        elements.todoSection.classList.remove('hidden');
+        elements.headerSubtitle.textContent = 'Staff TODO List';
+        if (window.todoView) {
+            window.todoView.render();
+        }
     } else if (sectionName === 'pharmacist') {
         elements.pharmacistSection.classList.remove('hidden');
         elements.headerSubtitle.textContent = 'Pharmacist Corner';
@@ -1350,37 +1611,37 @@ function closeSidebar() {
 // ==================== ID GENERATORS ====================
 function generatePatientId() {
     if (patients.length === 0) {
-        elements.patientId.value = 'P0001';
+        elements.patientId.value = `P0001-${deviceId}`;
         return;
     }
     const maxId = patients.reduce((max, p) => {
         const num = parseInt(p.id.replace('P', ''), 10);
-        return num > max ? num : max;
+        return isNaN(num) ? max : (num > max ? num : max);
     }, 0);
-    elements.patientId.value = `P${String(maxId + 1).padStart(4, '0')}`;
+    elements.patientId.value = `P${String(maxId + 1).padStart(4, '0')}-${deviceId}`;
 }
 
 function generateDoctorId() {
     if (doctors.length === 0) {
-        elements.doctorId.value = 'D0001';
+        elements.doctorId.value = `D0001-${deviceId}`;
         return;
     }
     const maxId = doctors.reduce((max, d) => {
         const num = parseInt(d.id.replace('D', ''), 10);
-        return num > max ? num : max;
+        return isNaN(num) ? max : (num > max ? num : max);
     }, 0);
-    elements.doctorId.value = `D${String(maxId + 1).padStart(4, '0')}`;
+    elements.doctorId.value = `D${String(maxId + 1).padStart(4, '0')}-${deviceId}`;
 }
 
 function generateAppointmentId() {
     if (appointments.length === 0) {
-        return 'A0001';
+        return `A0001-${deviceId}`;
     }
     const maxId = appointments.reduce((max, a) => {
         const num = parseInt(a.id.replace('A', ''), 10);
-        return num > max ? num : max;
+        return isNaN(num) ? max : (num > max ? num : max);
     }, 0);
-    return `A${String(maxId + 1).padStart(4, '0')}`;
+    return `A${String(maxId + 1).padStart(4, '0')}-${deviceId}`;
 }
 
 // ==================== RENDER LISTS ====================
@@ -1450,18 +1711,21 @@ function renderInstructionDoctorFilter() {
     const instructionDoctors = new Set();
     appointments.forEach(appt => {
         if ((appt.status === 'Done' || appt.status === 'Postpone') && appt.doctorName) {
-            instructionDoctors.add(appt.doctorName);
+            const doctor = doctors.find(d => d.name === appt.doctorName);
+            if (doctor ? (doctor.needInstruction !== false) : true) {
+                instructionDoctors.add(appt.doctorName);
+            }
         }
     });
 
-    // Also include doctors from the doctors list
+    // Also include doctors from the doctors list if they need instructions
     doctors.forEach(doctor => {
-        if (doctor.name) {
+        if (doctor.name && doctor.needInstruction !== false) {
             instructionDoctors.add(doctor.name);
         }
     });
 
-    console.log('[Instruction Filter] Populating filter with doctors:', Array.from(instructionDoctors));
+    TWOK_LOGGER.debug('[Instruction Filter] Populating filter with doctors:', Array.from(instructionDoctors));
 
     // Sort and add to filter
     const sortedDoctors = Array.from(instructionDoctors).sort();
@@ -1609,6 +1873,11 @@ function renderDoctorTable(filteredDoctors = null) {
             <td>${escapeHtml(doctor.speciality)}</td>
             <td>${escapeHtml(doctor.hospital)}</td>
             <td>${escapeHtml(doctor.phone)}</td>
+            <td>
+                ${doctor.needInstruction !== false ? 
+                    '<span class="status-badge status-booked" style="background-color: #dcfce7; color: #166534; border: 1px solid #bbf7d0;">Yes</span>' : 
+                    '<span class="status-badge status-noted" style="background-color: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb;">No</span>'}
+            </td>
             <td>
                 <div class="action-buttons">
                     <button type="button" class="btn btn-edit" onclick="editDoctor(event, '${doctor.id}')">Edit</button>
@@ -2006,6 +2275,7 @@ function loadDoctorToForm(doctorId) {
     elements.doctorSpeciality.value = d.speciality;
     elements.doctorHospital.value = d.hospital;
     elements.doctorPhone.value = d.phone;
+    elements.doctorNeedInstruction.checked = d.needInstruction !== false;
     doctorIsEditing = true;
     elements.doctorFormTitle.textContent = 'Edit Doctor';
     elements.doctorSaveBtnText.textContent = 'Update Doctor';
@@ -2021,7 +2291,8 @@ function saveDoctor(e) {
         name: elements.doctorName.value.trim(),
         speciality: elements.doctorSpeciality.value.trim(),
         hospital: elements.doctorHospital.value.trim(),
-        phone: elements.doctorPhone.value.trim()
+        phone: elements.doctorPhone.value.trim(),
+        needInstruction: elements.doctorNeedInstruction.checked
     };
     if (!data.name) { showNotification('Doctor name is required', 'error'); elements.doctorName.focus(); return; }
     if (!data.speciality) { showNotification('Speciality is required', 'error'); elements.doctorSpeciality.focus(); return; }
@@ -2117,6 +2388,7 @@ async function deleteDoctor(event, doctorId) {
 
 function resetDoctorForm() {
     elements.doctorForm.reset();
+    elements.doctorNeedInstruction.checked = true;
     elements.doctorEditIndex.value = '';
     doctorIsEditing = false;
     elements.doctorFormTitle.textContent = 'Register New Doctor';
@@ -2503,12 +2775,13 @@ function determineAppointmentStatus(doctorName, appointmentDateTime) {
 const STATUS_PRIORITY = {
     'In Consult': 1,
     'Investigation': 2,
-    'Arrived': 3,
-    'Booked': 4,
-    'Noted': 5,
-    'Postpone': 6,
-    'Cancelled': 7,
-    'Done': 8
+    'Echo Urgent': 3,
+    'Arrived': 4,
+    'Booked': 5,
+    'Noted': 6,
+    'Postpone': 7,
+    'Cancelled': 8,
+    'Done': 9
 };
 
 // Action button mapping based on status
@@ -2516,6 +2789,7 @@ const ACTION_BUTTON_MAP = {
     'Noted': { label: 'Booked', action: 'markBooked', class: 'action-btn-booked', icon: '📋' },
     'Booked': { label: 'Arrived', action: 'markArrived', class: 'action-btn-arrived', icon: '🙋' },
     'Arrived': { label: 'Consult', action: 'startConsult', class: 'action-btn-consult', icon: '💬' },
+    'Echo Urgent': { label: 'Consult', action: 'startConsult', class: 'action-btn-consult', icon: '💬' },
     'In Consult': { label: 'Investigation', action: 'showInvestigationDialog', class: 'action-btn-consult', icon: '🔬' },
     'Investigation': { label: 'Consult', action: 'startConsult', class: 'action-btn-consult', icon: '💬' },
     'Done': { label: '-', action: null, class: 'action-btn-disabled', icon: '✔️' },
@@ -2604,6 +2878,28 @@ function renderAppointmentTable(filteredAppointments = null) {
     const startIndex = (appointmentCurrentPage - 1) * ITEMS_PER_PAGE;
     const paginatedData = sortedData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
 
+    // OPTIMIZATION: Pre-calculate lab status map for current page to avoid O(N*M) lookup in map()
+    const patientLabMap = new Map();
+    if (paginatedData.length > 0) {
+        const patientIds = new Set(paginatedData.map(a => String(a.patientId)).filter(id => id && id !== 'undefined'));
+        const patientNames = new Set(paginatedData.map(a => a.patientName ? a.patientName.toLowerCase().trim() : '').filter(name => name));
+        
+        const statusesToShow = ['Complete Result Out', 'Partial Result Out', 'Inform to Doctor', 'Inform to Patient'];
+        
+        labRecords.forEach(lab => {
+            if (!statusesToShow.includes(lab.status)) return;
+            
+            const labPatientId = lab.patientId ? String(lab.patientId) : null;
+            const labPatientName = lab.patientName ? lab.patientName.toLowerCase().trim() : '';
+            
+            if ((labPatientId && patientIds.has(labPatientId)) || (labPatientName && patientNames.has(labPatientName))) {
+                const key = labPatientId || labPatientName;
+                if (!patientLabMap.has(key)) patientLabMap.set(key, []);
+                patientLabMap.get(key).push(lab);
+            }
+        });
+    }
+
     elements.appointmentTableBody.innerHTML = paginatedData.map(appt => {
         const statusClass = getStatusClass(appt.status);
         const typeClass = getBookingTypeClass(appt.bookingType);
@@ -2611,6 +2907,19 @@ function renderAppointmentTable(filteredAppointments = null) {
         const displayNumber = appt.bookingNumber !== null ? appt.bookingNumber : '-';
         const timeDisplay = appt.appointmentTime ? new Date(appt.appointmentTime).toLocaleString() : '-';
         const arrivalTimeDisplay = appt.arrivalTime ? formatDateTime(appt.arrivalTime) : '-';
+
+        // Check for long wait (more than 2 hours)
+        let longWaitWarning = '';
+        let longWaitClass = '';
+        if (appt.arrivalTime && (appt.status === 'Arrived' || appt.status === 'Investigation' || appt.status === 'Echo Urgent')) {
+            const arrivalDate = new Date(appt.arrivalTime);
+            const now = new Date();
+            const diffInMinutes = Math.floor((now - arrivalDate) / 60000);
+            if (diffInMinutes >= 120) {
+                longWaitWarning = `<div class="long-wait-warning" title="Waiting for ${Math.floor(diffInMinutes / 60)}h ${diffInMinutes % 60}m">⚠️ Long Wait (${Math.floor(diffInMinutes / 60)}h+)</div>`;
+                longWaitClass = 'long-wait-row';
+            }
+        }
 
         // Get action button config
         const actionConfig = ACTION_BUTTON_MAP[appt.status] || ACTION_BUTTON_MAP['Noted'];
@@ -2624,15 +2933,24 @@ function renderAppointmentTable(filteredAppointments = null) {
             actionButtonHtml = `<span style="color: var(--text-secondary); font-size: 0.85rem;">${actionConfig.icon} ${actionConfig.label}</span>`;
         }
 
+        // Optimized lab icons using pre-calculated map
+        const apptPatientId = appt.patientId ? String(appt.patientId) : null;
+        const apptPatientName = appt.patientName ? appt.patientName.toLowerCase().trim() : '';
+        const patientLabs = (apptPatientId && patientLabMap.get(apptPatientId)) || (apptPatientName && patientLabMap.get(apptPatientName)) || [];
+        const labIconsHtml = buildLabStatusIconsOptimized(appt, patientLabs);
+
         return `
-            <tr data-id="${appt.id}" class="${rowClass}">
+            <tr data-id="${appt.id}" class="${rowClass} ${longWaitClass}">
                 <td>
                     ${appt.bookingNumber !== null ?
                         `<span class="queue-number-badge ${queueClass}">${displayNumber}</span>` :
                         '<span>-</span>'}
-                    ${buildLabStatusIcons(appt)}
+                    ${labIconsHtml}
                 </td>
-                <td>${escapeHtml(appt.patientName)}</td>
+                <td>
+                    ${escapeHtml(appt.patientName)}
+                    ${longWaitWarning}
+                </td>
                 <td>${escapeHtml(appt.age)}</td>
                 <td>${escapeHtml(appt.phone)}</td>
                 <td>${escapeHtml(appt.doctorName)}</td>
@@ -2658,9 +2976,71 @@ function renderAppointmentTable(filteredAppointments = null) {
 }
 
 // ==================== APPOINTMENT WORKFLOW ACTIONS ====================
+/**
+ * Optimized version of buildLabStatusIcons using pre-filtered labs
+ */
+function buildLabStatusIconsOptimized(appt, pendingLabs) {
+    if (!appt || !pendingLabs || pendingLabs.length === 0) return '';
+
+    // Further filter for results not yet received by patient
+    const unreceivedLabs = pendingLabs.filter(lab => {
+        const timeline = lab.timeline || {};
+        return !timeline.patientReceived;
+    });
+
+    if (unreceivedLabs.length === 0) return '';
+
+    let html = '<div class="lab-status-icons">';
+
+    // Group by labId to avoid duplicate icons
+    const uniqueLabs = [];
+    const seenLabIds = new Set();
+
+    unreceivedLabs.forEach(lab => {
+        const id = lab.labId || lab.id;
+        if (!seenLabIds.has(id)) {
+            uniqueLabs.push(lab);
+            seenLabIds.add(id);
+        }
+    });
+
+    uniqueLabs.forEach(lab => {
+        const isPartial = lab.status === 'Partial Result Out';
+        const isInform = lab.status === 'Inform to Doctor' || lab.status === 'Inform to Patient';
+
+        let bgColor = '#d1fae5'; 
+        let icon = '📋';
+        let title = 'Complete results - awaiting patient pickup';
+
+        if (isPartial) {
+            bgColor = '#fef3c7';
+            icon = '⚠️';
+            title = 'Partial results - some tests pending';
+        } else if (isInform) {
+            bgColor = '#e0f2fe';
+            icon = '📞';
+            title = `Status: ${lab.status}`;
+        }
+
+        html += `
+            <span 
+                class="lab-status-icon" 
+                title="${title}"
+                style="background-color: ${bgColor};"
+                onclick="event.stopPropagation(); showPatientLabDetails('${lab.patientId || ''}', '${escapeHtml(lab.patientName || appt.patientName)}')"
+            >
+                ${icon}
+            </span>
+        `;
+    });
+
+    html += '</div>';
+    return html;
+}
 
 /**
  * Build lab status icons for appointment table
+...
  * Shows icons for lab results that are out but not yet received by patient
  * @param {Object} appt - Appointment object
  * @returns {string} HTML string with lab status icons
@@ -2863,10 +3243,13 @@ async function markAppointmentBooked(appointmentId) {
     const index = appointments.findIndex(a => a.id === appointmentId);
     if (index === -1) return;
 
+    // Save history for undo
+    pushToUndoHistory(appointmentId);
+
     const appt = appointments[index];
     appt.status = 'Booked';
     appt.bookedTime = toLocalISOString(new Date());
-    await saveAppointmentsToStorage();
+    await saveAppointmentsToStorage(appointmentId);
     renderAppointmentTable();
     updateQueueSummary();
     showNotification('Appointment marked as Booked');
@@ -2889,23 +3272,32 @@ async function markAppointmentArrived(appointmentId) {
     const index = appointments.findIndex(a => a.id === appointmentId);
     if (index === -1) return;
 
+    // Save history for undo
+    pushToUndoHistory(appointmentId);
+
     const appt = appointments[index];
     appt.status = 'Arrived';
     appt.arrivalTime = toLocalISOString(new Date());
 
-    // Calculate penalty for late arrival
-    const consultingNow = getCurrentlyConsultingNumber(appt.doctorName);
-    const patientBookingNum = parseInt(appt.bookingNumber, 10) || 999;
-
-    // If patient's booking number has already passed, apply 3-turn penalty
-    if (consultingNow > 0 && patientBookingNum < consultingNow) {
-        appt.penaltyTurns = 3;
-        showNotification(`Late arrival! Patient #${patientBookingNum} receives 3-turn penalty`, 'error');
+    // Echo Urgent logic: set waiting turns from settings
+    if (appt.bookingType === 'Echo Urgent') {
+        appt.waitingTurns = waitingTurnsSetting;
+        showNotification(`Echo Urgent patient! Patient #${appt.bookingNumber || '-'} receives ${waitingTurnsSetting} waiting turns.`, 'info');
     } else {
-        appt.penaltyTurns = 0;
+        // Calculate penalty for late arrival for other booking types
+        const consultingNow = getCurrentlyConsultingNumber(appt.doctorName);
+        const patientBookingNum = parseInt(appt.bookingNumber, 10) || 999;
+
+        // If patient's booking number has already passed, apply penalty turns from settings
+        if (consultingNow > 0 && patientBookingNum < consultingNow) {
+            appt.penaltyTurns = penaltyTurnsSetting;
+            showNotification(`Late arrival! Patient #${patientBookingNum} receives ${penaltyTurnsSetting}-turn penalty`, 'error');
+        } else {
+            appt.penaltyTurns = 0;
+        }
     }
 
-    await saveAppointmentsToStorage();
+    await saveAppointmentsToStorage(appointmentId);
     renderAppointmentTable();
     updateQueueSummary();
     showNotification('Patient marked as Arrived');
@@ -2955,16 +3347,24 @@ async function startConsultation(appointmentId) {
     const index = appointments.findIndex(a => a.id === appointmentId);
     if (index === -1) return;
 
+    // Save history for undo
+    pushToUndoHistory(appointmentId);
+
     const appt = appointments[index];
     appt.status = 'In Consult';
     appt.isNext = false; // Clear locked status when starting
     appt.consultStartTime = toLocalISOString(new Date());
     appt.penaltyTurns = 0; // Clear any penalty turns when consultation starts
     
+    // Reduce penalty turns for other waiting patients if this is the target doctor
+    if (appt.doctorName === TARGET_DOCTOR_NAME) {
+        await reducePenaltyTurns();
+    }
+    
     // Automatically designate the new next patient
     autoDesignateNextPatient(appt.doctorName);
     
-    await saveAppointmentsToStorage();
+    await saveAppointmentsToStorage(appointmentId);
     renderAppointmentTable();
     updateQueueSummary();
     showNotification(`Consultation started for #${appt.bookingNumber || '-'} ${appt.patientName}`);
@@ -3023,6 +3423,9 @@ function closeInvestigationDialog() {
 async function handleInvestigationYes() {
     if (!currentConsultingAppointment) return;
 
+    // Save history for undo
+    pushToUndoHistory(currentConsultingAppointment);
+
     const index = appointments.findIndex(a => a.id === currentConsultingAppointment);
     if (index === -1) {
         closeInvestigationDialog();
@@ -3032,7 +3435,11 @@ async function handleInvestigationYes() {
     // Mark the patient as investigated
     appointments[index].status = 'Investigation';
     appointments[index].investigationOrderedTime = toLocalISOString(new Date());
-    await saveAppointmentsToStorage();
+    
+    // Reduce penalty turns for other waiting patients
+    const penaltyResult = await reducePenaltyTurns();
+    
+    await saveAppointmentsToStorage([currentConsultingAppointment, ...penaltyResult.updatedIds]);
 
     // Track this patient as "just investigated" so they're excluded from next candidate list
     lastInvestigatedPatientId = currentConsultingAppointment;
@@ -3065,29 +3472,50 @@ async function handleInvestigationYes() {
 async function reducePenaltyTurns() {
     const today = toLocalDateString(new Date());
     const waitingStatuses = ['Arrived', 'Investigation', 'Booked', 'Noted'];
-    let penaltyReduced = false;
+    let reduced = false;
     const reducedPatients = [];
+    const updatedIds = [];
 
     appointments.forEach(appt => {
         const apptDate = appt.appointmentTime ? appt.appointmentTime.split('T')[0] : '';
-        if (apptDate === today && waitingStatuses.includes(appt.status) && appt.penaltyTurns > 0) {
-            const oldPenalty = appt.penaltyTurns;
-            appt.penaltyTurns--;
-            penaltyReduced = true;
-            reducedPatients.push({
-                name: appt.patientName,
-                bookingNumber: appt.bookingNumber,
-                oldPenalty: oldPenalty,
-                newPenalty: appt.penaltyTurns
-            });
+        if (apptDate === today && waitingStatuses.includes(appt.status)) {
+            // Handle penalty turns (for late arrivals)
+            if (appt.penaltyTurns > 0) {
+                const oldPenalty = appt.penaltyTurns;
+                appt.penaltyTurns--;
+                reduced = true;
+                updatedIds.push(appt.id);
+                reducedPatients.push({
+                    name: appt.patientName,
+                    bookingNumber: appt.bookingNumber,
+                    oldTurns: oldPenalty,
+                    newTurns: appt.penaltyTurns,
+                    type: 'penalty'
+                });
+            }
+            
+            // Handle waiting turns (for Echo Urgent)
+            if (appt.waitingTurns > 0) {
+                const oldWaiting = appt.waitingTurns;
+                appt.waitingTurns--;
+                reduced = true;
+                if (!updatedIds.includes(appt.id)) updatedIds.push(appt.id);
+                reducedPatients.push({
+                    name: appt.patientName,
+                    bookingNumber: appt.bookingNumber,
+                    oldTurns: oldWaiting,
+                    newTurns: appt.waitingTurns,
+                    type: 'waiting'
+                });
+            }
         }
     });
 
-    if (penaltyReduced) {
-        await saveAppointmentsToStorage();
+    if (reduced) {
+        await saveAppointmentsToStorage(updatedIds);
     }
 
-    return { reduced: penaltyReduced, patients: reducedPatients };
+    return { reduced, patients: reducedPatients, updatedIds };
 }
 
 /**
@@ -3095,6 +3523,9 @@ async function reducePenaltyTurns() {
  */
 async function handleInvestigationNo() {
     if (!currentConsultingAppointment) return;
+
+    // Save history for undo
+    pushToUndoHistory(currentConsultingAppointment);
 
     const index = appointments.findIndex(a => a.id === currentConsultingAppointment);
     if (index === -1) {
@@ -3109,7 +3540,7 @@ async function handleInvestigationNo() {
     // Reduce penalty turns for all waiting patients
     const penaltyResult = await reducePenaltyTurns();
 
-    await saveAppointmentsToStorage();
+    await saveAppointmentsToStorage([currentConsultingAppointment, ...penaltyResult.updatedIds]);
 
     // Check if there is already a designated next patient (to get the list)
     const today = toLocalDateString(new Date());
@@ -3150,35 +3581,54 @@ async function handleInvestigationNo() {
 }
 
 /**
- * Sort appointments for queue display with penalty logic
+ * Sort appointments for queue display with penalty and Echo Urgent logic
  */
 function sortAppointmentsForQueue(appts) {
     return [...appts].sort((a, b) => {
-        // Priority 0: Locked Next Patient (isNext)
+        // Priority 0: Status 'In Consult' always first
+        if (a.status === 'In Consult' && b.status !== 'In Consult') return -1;
+        if (a.status !== 'In Consult' && b.status === 'In Consult') return 1;
+
+        // Priority 1: Locked Next Patient (isNext)
         if (a.isNext && !b.isNext) return -1;
         if (!a.isNext && b.isNext) return 1;
 
-        // Priority 1: Status priority
-        const aPriority = STATUS_PRIORITY[a.status] || 99;
-        const bPriority = STATUS_PRIORITY[b.status] || 99;
+        // Custom Priority Logic requested by user:
+        // Emergency > Investigated patient > Echo Urgent (with 0 turns) > Normal queue patient without penalty > Queue patient with penalty
+        
+        const getCustomPriority = (appt) => {
+            if (appt.bookingType === 'Emergency') return 1;
+            if (appt.status === 'Investigation') return 2;
+            
+            // Echo Urgent logic: only prioritize if waiting turns are 0
+            if (appt.bookingType === 'Echo Urgent') {
+                return (appt.waitingTurns || 0) === 0 ? 3 : 6; // 3 if ready, 6 (below normal) if still waiting
+            }
+            
+            // Normal patients
+            const hasPenalty = appt.penaltyTurns && appt.penaltyTurns > 0;
+            return hasPenalty ? 5 : 4; // 4: No penalty, 5: With penalty
+        };
 
-        if (aPriority !== bPriority) {
-            return aPriority - bPriority;
+        const aCustom = getCustomPriority(a);
+        const bCustom = getCustomPriority(b);
+
+        if (aCustom !== bCustom) {
+            return aCustom - bCustom;
         }
 
-        // Priority 2: Penalty (no penalty first, penalty last)
-        const aHasPenalty = a.penaltyTurns && a.penaltyTurns > 0;
-        const bHasPenalty = b.penaltyTurns && b.penaltyTurns > 0;
+        // Priority 2: Status priority (for remaining statuses like Arrived vs Booked)
+        const aStatusPrio = STATUS_PRIORITY[a.status] || 99;
+        const bStatusPrio = STATUS_PRIORITY[b.status] || 99;
 
-        if (aHasPenalty && !bHasPenalty) return 1;
-        if (!aHasPenalty && bHasPenalty) return -1;
+        if (aStatusPrio !== bStatusPrio) {
+            return aStatusPrio - bStatusPrio;
+        }
 
-        // Priority 3: Booking number in ascending order (0, 1, 2, 3, ...)
-        // null/undefined booking numbers go to the end
+        // Priority 3: Booking number in ascending order
         if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
         if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
 
-        // Sort by booking number ascending (0 comes before 1, 2, 3, etc.)
         const aNum = parseInt(a.bookingNumber, 10);
         const bNum = parseInt(b.bookingNumber, 10);
         return aNum - bNum;
@@ -3350,8 +3800,12 @@ async function autoDesignateNextPatient(doctorName = TARGET_DOCTOR_NAME) {
     if (eligible.some(a => a.isNext)) return;
 
     // Clear any stale isNext flags for this doctor (safety check)
+    const affectedIds = [];
     appointments.forEach(a => {
-        if (a.doctorName === doctorName) a.isNext = false;
+        if (a.doctorName === doctorName && a.isNext) {
+            a.isNext = false;
+            affectedIds.push(a.id);
+        }
     });
 
     if (eligible.length > 0) {
@@ -3359,8 +3813,11 @@ async function autoDesignateNextPatient(doctorName = TARGET_DOCTOR_NAME) {
         const sorted = sortAppointmentsForQueue(eligible);
         // The first one becomes the locked next patient
         sorted[0].isNext = true;
+        if (!affectedIds.includes(sorted[0].id)) {
+            affectedIds.push(sorted[0].id);
+        }
         
-        await saveAppointmentsToStorage();
+        await saveAppointmentsToStorage(affectedIds);
         console.log(`[Queue] Auto-designated #${sorted[0].bookingNumber} ${sorted[0].patientName} as Next`);
     }
 }
@@ -3486,17 +3943,18 @@ function showCandidate(index) {
     const candidate = patientCandidates[index];
     const patient = candidate.appointment;
 
-    // Mark this patient as the locked next patient
+    const affectedIds = [patient.id];
     // First, clear isNext for all appointments for this doctor
     appointments.forEach(a => {
-        if (a.doctorName === patient.doctorName) {
+        if (a.doctorName === patient.doctorName && a.isNext) {
             a.isNext = false;
+            affectedIds.push(a.id);
         }
     });
     
     // Set isNext for this patient
     patient.isNext = true;
-    saveAppointmentsToStorage();
+    saveAppointmentsToStorage(affectedIds);
     renderAppointmentTable();
     updateQueueSummary();
 
@@ -3543,7 +4001,7 @@ function showNoPatientsMessage() {
  * If someone is already in consultation, queue this patient for next turn
  * @param {Object} patient - Patient appointment object
  */
-function callNextPatient(patient) {
+async function callNextPatient(patient) {
     if (!patient) return;
 
     const today = toLocalDateString(new Date());
@@ -3562,10 +4020,12 @@ function callNextPatient(patient) {
         // Set status to Arrived with 0 penalty turns (highest priority for next)
         // AND mark them as the locked next patient
         
+        const affectedIds = [patient.id];
         // Clear isNext for all appointments for this doctor
         appointments.forEach(a => {
-            if (a.doctorName === patient.doctorName) {
+            if (a.doctorName === patient.doctorName && a.isNext) {
                 a.isNext = false;
+                affectedIds.push(a.id);
             }
         });
         
@@ -3573,7 +4033,13 @@ function callNextPatient(patient) {
         patient.penaltyTurns = 0;
         patient.isNext = true;
         
-        saveAppointmentsToStorage();
+        // Reduce penalty turns for other waiting patients
+        let penaltyResult = { updatedIds: [] };
+        if (patient.doctorName === TARGET_DOCTOR_NAME) {
+            penaltyResult = await reducePenaltyTurns();
+        }
+        
+        await saveAppointmentsToStorage([...affectedIds, ...penaltyResult.updatedIds]);
         renderAppointmentTable();
         updateQueueSummary();
 
@@ -3622,7 +4088,13 @@ function renderInstructionTableWithSaved() {
 
     // Get ALL appointments with status "Done" or "Postpone"
     let allAppointments = appointments.filter(appt => {
-        return appt.status === 'Done' || appt.status === 'Postpone';
+        const isDoneOrPostpone = appt.status === 'Done' || appt.status === 'Postpone';
+        if (!isDoneOrPostpone) return false;
+        
+        // Find doctor to check needInstruction flag
+        const doctor = doctors.find(d => d.name === appt.doctorName);
+        // Only show if doctor needs instructions (defaults to true if doctor not found or flag not set)
+        return doctor ? (doctor.needInstruction !== false) : true;
     });
 
     console.log('[Instruction Filter] Total Done/Postpone appointments:', allAppointments.length);
@@ -4409,7 +4881,7 @@ async function saveAppointment(e) {
                 }
             });
             appointments[idx] = data;
-            await saveAppointmentsToStorage();
+            await saveAppointmentsToStorage(data.id);
             showNotification('Appointment updated successfully!');
             
             // Broadcast update to TV displays via WebSocket
@@ -4417,7 +4889,7 @@ async function saveAppointment(e) {
         }
     } else {
         appointments.push(data);
-        await saveAppointmentsToStorage();
+        await saveAppointmentsToStorage(data.id);
         showNotification('Appointment created successfully!');
         
         // Broadcast new appointment to TV displays via WebSocket
@@ -4479,7 +4951,7 @@ window.useRegularNumberForVip = useRegularNumberForVip;
 /**
  * Complete VIP appointment save with selected slot
  */
-function completeVipAppointmentSave(selectedSlot) {
+async function completeVipAppointmentSave(selectedSlot) {
     // Check if appointment date is today or tomorrow
     const apptDate = new Date(vipSlotPendingData.dateTime.split('T')[0]);
     const today = new Date();
@@ -4518,7 +4990,7 @@ function completeVipAppointmentSave(selectedSlot) {
     data[statusTimeKey] = toLocalISOString(new Date());
 
     appointments.push(data);
-    saveAppointmentsToStorage();
+    await saveAppointmentsToStorage(data.id);
     showNotification(`VIP slot #${selectedSlot} assigned to ${vipSlotPendingData.patientName}!`);
 
     // Broadcast new appointment to TV displays via WebSocket
@@ -4541,7 +5013,7 @@ function completeVipAppointmentSave(selectedSlot) {
 /**
  * Use regular number instead of VIP slot
  */
-function useRegularNumberForVip() {
+async function useRegularNumberForVip() {
     if (!vipSlotPendingData) return;
 
     // Calculate regular number and save
@@ -4588,7 +5060,7 @@ function useRegularNumberForVip() {
     data[statusTimeKey] = toLocalISOString(new Date());
 
     appointments.push(data);
-    saveAppointmentsToStorage();
+    await saveAppointmentsToStorage(data.id);
     showNotification(`Regular slot #${regularNumber} assigned to ${vipSlotPendingData.patientName} (VIP)`);
 
     sendQueueEvent('appointment_created', { ...data, action: 'created' });
@@ -4936,7 +5408,7 @@ function recalculateCalendarBookingNumber() {
 /**
  * Save calendar appointment
  */
-function saveCalendarAppointment(e) {
+async function saveCalendarAppointment(e) {
     e.preventDefault();
 
     const patientName = elements.calendarApptPatient.value.trim();
@@ -5039,7 +5511,7 @@ function saveCalendarAppointment(e) {
     };
 
     appointments.push(data);
-    saveAppointmentsToStorage();
+    await saveAppointmentsToStorage(data.id);
 
     // Broadcast new appointment
     sendQueueEvent('appointment_created', { ...data, action: 'created' });
@@ -5191,6 +5663,26 @@ function setupEventListeners() {
     // Overlay click to close sidebar
     elements.sidebarOverlay.addEventListener('click', closeSidebar);
 
+    // Undo System
+    if (elements.undoAppointmentBtn) {
+        elements.undoAppointmentBtn.addEventListener('click', () => {
+            undoLastAppointmentAction();
+        });
+    }
+
+    // Global keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        // Ctrl + Z for Undo
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+            // Only trigger if not in an input field (unless it's a field we want to support)
+            const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+            if (!isInput) {
+                e.preventDefault();
+                undoLastAppointmentAction();
+            }
+        }
+    });
+
     // Enable horizontal scroll with mouse drag for bottom nav
     const bottomNav = document.querySelector('.bottom-nav');
     if (bottomNav) {
@@ -5287,6 +5779,40 @@ function setupEventListeners() {
     elements.patientForm.addEventListener('submit', savePatient);
 
     // Patient - Mobile navigation (blur auto-advance)
+    elements.patientName.addEventListener('input', (e) => {
+        showPatientRegisterAutocomplete(e.target.value);
+        patientRegisterAutocompleteHighlighted = -1;
+    });
+
+    elements.patientName.addEventListener('focus', (e) => {
+        if (e.target.value) showPatientRegisterAutocomplete(e.target.value);
+    });
+
+    elements.patientName.addEventListener('keydown', (e) => {
+        const dropdown = elements.patientRegisterAutocomplete;
+        if (dropdown.classList.contains('hidden')) return;
+
+        const items = dropdown.querySelectorAll('.autocomplete-item');
+        if (items.length === 0) return;
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            patientRegisterAutocompleteHighlighted = (patientRegisterAutocompleteHighlighted + 1) % items.length;
+            updateAutocompleteHighlight(dropdown, patientRegisterAutocompleteHighlighted);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            patientRegisterAutocompleteHighlighted = (patientRegisterAutocompleteHighlighted - 1 + items.length) % items.length;
+            updateAutocompleteHighlight(dropdown, patientRegisterAutocompleteHighlighted);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (patientRegisterAutocompleteHighlighted > -1) {
+                items[patientRegisterAutocompleteHighlighted].click();
+            }
+        } else if (e.key === 'Escape') {
+            dropdown.classList.add('hidden');
+        }
+    });
+
     elements.patientName.addEventListener('blur', () => {
         setTimeout(() => {
             if (!document.activeElement.closest('#patientName') && elements.patientName.value) {
@@ -5682,6 +6208,7 @@ function setupEventListeners() {
         if (!e.target.closest('.autocomplete-wrapper')) {
             elements.patientAutocomplete.classList.add('hidden');
             elements.doctorAutocomplete.classList.add('hidden');
+            elements.patientRegisterAutocomplete.classList.add('hidden');
         }
     });
 
@@ -6190,6 +6717,12 @@ function setupEventListeners() {
         if (e.key === 'Enter') addVipNumber();
     });
 
+    // Save Queue Settings
+    const saveQueueSettingsBtn = document.getElementById('saveQueueSettingsBtn');
+    if (saveQueueSettingsBtn) {
+        saveQueueSettingsBtn.addEventListener('click', saveQueueSettings);
+    }
+
     // Save default times button
     const saveDefaultTimesBtn = document.getElementById('saveDefaultTimesBtn');
     if (saveDefaultTimesBtn) {
@@ -6252,6 +6785,52 @@ function addVipNumber() {
     input.value = '';
     renderVipNumbersList();
     showNotification(`VIP number ${value} added successfully!`);
+}
+
+/**
+ * Load Queue Settings from localStorage
+ */
+function loadQueueSettings() {
+    const penalty = localStorage.getItem('twok_clinic_penalty_turns');
+    if (penalty !== null) {
+        penaltyTurnsSetting = parseInt(penalty, 10) || PENALTY_TURNS_DEFAULT;
+    }
+    
+    const waiting = localStorage.getItem('twok_clinic_waiting_turns');
+    if (waiting !== null) {
+        waitingTurnsSetting = parseInt(waiting, 10) || WAITING_TURNS_DEFAULT;
+    }
+
+    // Update UI if on settings page
+    const penaltyInput = document.getElementById('penaltyTurnsSettingInput');
+    const waitingInput = document.getElementById('waitingTurnsSettingInput');
+    if (penaltyInput) penaltyInput.value = penaltyTurnsSetting;
+    if (waitingInput) waitingInput.value = waitingTurnsSetting;
+}
+
+/**
+ * Save Queue Settings to localStorage
+ */
+function saveQueueSettings() {
+    const penaltyInput = document.getElementById('penaltyTurnsSettingInput');
+    const waitingInput = document.getElementById('waitingTurnsSettingInput');
+    
+    if (penaltyInput && waitingInput) {
+        const penalty = parseInt(penaltyInput.value, 10);
+        const waiting = parseInt(waitingInput.value, 10);
+        
+        if (!isNaN(penalty) && penalty >= 1 && !isNaN(waiting) && waiting >= 1) {
+            penaltyTurnsSetting = penalty;
+            waitingTurnsSetting = waiting;
+            
+            localStorage.setItem('twok_clinic_penalty_turns', penaltyTurnsSetting);
+            localStorage.setItem('twok_clinic_waiting_turns', waitingTurnsSetting);
+            
+            showNotification('Queue settings saved successfully', 'success');
+        } else {
+            showNotification('Please enter valid turn numbers (minimum 1)', 'error');
+        }
+    }
 }
 
 /**
@@ -6488,7 +7067,7 @@ function renderBookingEditorTable() {
 /**
  * Save booking number changes
  */
-function saveBookingChanges() {
+async function saveBookingChanges() {
     if (bookingEditorAppointments.length === 0) {
         showNotification('No appointments to save.', 'error');
         return;
@@ -6520,17 +7099,19 @@ function saveBookingChanges() {
     
     // Apply changes
     let updated = false;
+    const updatedIds = [];
     changes.forEach(({ appt, newNumber }) => {
         // Find the original appointment in the main appointments array
         const originalIndex = appointments.findIndex(a => a.id === appt.id);
         if (originalIndex > -1 && appointments[originalIndex].bookingNumber !== newNumber) {
             appointments[originalIndex].bookingNumber = newNumber;
+            updatedIds.push(appt.id);
             updated = true;
         }
     });
     
     if (updated) {
-        saveAppointmentsToStorage();
+        await saveAppointmentsToStorage(updatedIds);
         renderAppointmentTable();
         updateQueueSummary();
         
@@ -6573,8 +7154,12 @@ function saveInstruction(e) {
     // Save new doctor if typed and not in list
     const newDoctor = elements.instructNextDoctor.value.trim();
     if (newDoctor && !doctors.some(d => (d.name || '').toLowerCase() === newDoctor.toLowerCase())) {
+        const maxDocId = doctors.reduce((max, d) => {
+            const num = parseInt(d.id.replace('D', ''), 10);
+            return isNaN(num) ? max : (num > max ? num : max);
+        }, 0);
         doctors.push({
-            id: 'D' + String(doctors.length + 1).padStart(4, '0'),
+            id: `D${String(maxDocId + 1).padStart(4, '0')}-${deviceId}`,
             name: newDoctor,
             speciality: '',
             hospital: '',
@@ -6585,7 +7170,7 @@ function saveInstruction(e) {
     }
     
     const instructionData = {
-        id: editId ? editId : 'I' + Date.now(),
+        id: editId ? editId : `I${Date.now()}-${deviceId}`,
         appointmentId: appointmentId,
         patientId: patientId,
         patientName: appt.patientName,
@@ -6642,7 +7227,7 @@ function saveInstruction(e) {
         const index = instructions.findIndex(i => i.id === editId);
         if (index > -1) {
             instructions[index] = instructionData;
-            saveInstructionsToStorage();
+            saveInstructionsToStorage(instructionData.id);
             closeInstructionFormPanel();
             renderInstructionTableWithSaved();
             showNotification('Instruction updated successfully!');
@@ -6652,7 +7237,7 @@ function saveInstruction(e) {
 
     // New instruction
     instructions.push(instructionData);
-    saveInstructionsToStorage();
+    saveInstructionsToStorage(instructionData.id);
 
     closeInstructionFormPanel();
     renderInstructionTableWithSaved();
@@ -6753,10 +7338,10 @@ function renderExpenseMonthFilter() {
  * Render expenses table grouped by date
  */
 function renderExpenses() {
-    console.log('[renderExpenses] Starting render...');
-    console.log('[renderExpenses] expenseTableContainer:', elements.expenseTableContainer);
-    console.log('[renderExpenses] expenseEmptyMessage:', elements.expenseEmptyMessage);
-    console.log('[renderExpenses] expenseTotalCount:', elements.expenseTotalCount);
+    TWOK_LOGGER.debug('[renderExpenses] Starting render...');
+    TWOK_LOGGER.debug('[renderExpenses] expenseTableContainer:', elements.expenseTableContainer);
+    TWOK_LOGGER.debug('[renderExpenses] expenseEmptyMessage:', elements.expenseEmptyMessage);
+    TWOK_LOGGER.debug('[renderExpenses] expenseTotalCount:', elements.expenseTotalCount);
     
     if (!elements.expenseTableContainer || !elements.expenseEmptyMessage || !elements.expenseTotalCount) {
         console.error('Expense elements not found');
@@ -6814,68 +7399,70 @@ function renderExpenses() {
                     <span class="expense-date-title">${dateLabel}</span>
                     <span class="expense-date-subtotal">Total: ${formatCurrency(dateTotal)}</span>
                 </div>
-                <table class="expense-date-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 25%;">Category</th>
-                            <th style="width: 40%;">Remark</th>
-                            <th style="width: 15%; text-align: right;">Amount</th>
-                            <th style="width: 5%; text-align: center;">Note</th>
-                            <th style="width: 15%; text-align: right;">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${dateExpenses.map(exp => {
-                            // Build category display: category + doctor name if available
-                            let categoryDisplay = escapeHtml(exp.category);
-                            if (exp.doctor_name) {
-                                categoryDisplay += `<br><small style="color: #6b7280;">(${escapeHtml(exp.doctor_name)})</small>`;
-                            }
-
-                            // Build remark display: item name (bold) + patient name
-                            let remarkDisplay = '-';
-                            const itemName = exp.item_name || exp.remark || '';
-                            const patientName = exp.patientName || '';
-
-                            if (itemName || patientName) {
-                                let parts = [];
-
-                                // Item name (bold)
-                                if (itemName) {
-                                    parts.push(`<strong>${escapeHtml(itemName)}</strong>`);
+                <div class="table-wrapper">
+                    <table class="expense-date-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 25%;">Category</th>
+                                <th style="width: 40%;">Remark</th>
+                                <th style="width: 15%; text-align: right;">Amount</th>
+                                <th style="width: 5%; text-align: center;">Note</th>
+                                <th style="width: 15%; text-align: right;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${dateExpenses.map(exp => {
+                                // Build category display: category + doctor name if available
+                                let categoryDisplay = escapeHtml(exp.category);
+                                if (exp.doctor_name) {
+                                    categoryDisplay += `<br><small style="color: #6b7280;">(${escapeHtml(exp.doctor_name)})</small>`;
                                 }
 
-                                // Patient name (in parentheses)
-                                if (patientName) {
-                                    parts.push(`(${escapeHtml(patientName)})`);
+                                // Build remark display: item name (bold) + patient name
+                                let remarkDisplay = '-';
+                                const itemName = exp.item_name || exp.remark || '';
+                                const patientName = exp.patientName || '';
+
+                                if (itemName || patientName) {
+                                    let parts = [];
+
+                                    // Item name (bold)
+                                    if (itemName) {
+                                        parts.push(`<strong>${escapeHtml(itemName)}</strong>`);
+                                    }
+
+                                    // Patient name (in parentheses)
+                                    if (patientName) {
+                                        parts.push(`(${escapeHtml(patientName)})`);
+                                    }
+
+                                    remarkDisplay = parts.join('<br>');
                                 }
 
-                                remarkDisplay = parts.join('<br>');
-                            }
+                                // Note indicator button
+                                let noteCell = '';
+                                if (exp.note) {
+                                    noteCell = `<td class="expense-note" style="text-align: center;"><button type="button" class="btn-note-indicator" onclick="event.stopPropagation(); showExpenseNote('${exp.id}')" title="View Note">📝</button></td>`;
+                                } else {
+                                    noteCell = `<td class="expense-note" style="text-align: center;"></td>`;
+                                }
 
-                            // Note indicator button
-                            let noteCell = '';
-                            if (exp.note) {
-                                noteCell = `<td class="expense-note" style="text-align: center;"><button type="button" class="btn-note-indicator" onclick="event.stopPropagation(); showExpenseNote('${exp.id}')" title="View Note">📝</button></td>`;
-                            } else {
-                                noteCell = `<td class="expense-note" style="text-align: center;"></td>`;
-                            }
-
-                            return `
-                                <tr data-id="${exp.id}">
-                                    <td class="expense-category">${categoryDisplay}</td>
-                                    <td class="expense-remark">${remarkDisplay}</td>
-                                    <td class="expense-amount" style="text-align: right;">${formatCurrency(exp.amount)}</td>
-                                    ${noteCell}
-                                    <td class="expense-actions" style="text-align: right;">
-                                        <button type="button" class="btn btn-edit btn-sm" onclick="event.stopPropagation(); openEditExpense('${exp.id}')">Edit</button>
-                                        <button type="button" class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteExpense('${exp.id}')">Delete</button>
-                                    </td>
-                                </tr>
-                            `;
-                        }).join('')}
-                    </tbody>
-                </table>
+                                return `
+                                    <tr data-id="${exp.id}">
+                                        <td class="expense-category">${categoryDisplay}</td>
+                                        <td class="expense-remark">${remarkDisplay}</td>
+                                        <td class="expense-amount" style="text-align: right;">${formatCurrency(exp.amount)}</td>
+                                        ${noteCell}
+                                        <td class="expense-actions" style="text-align: right;">
+                                            <button type="button" class="btn btn-edit btn-sm" onclick="event.stopPropagation(); openEditExpense('${exp.id}')">Edit</button>
+                                            <button type="button" class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteExpense('${exp.id}')">Delete</button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         `;
     });
@@ -7148,14 +7735,14 @@ function showExpenseNote(expenseId) {
  */
 function generateLabId() {
     if (labRecords.length === 0) {
-        return 'L0000001';
+        return `L0000001-${deviceId}`;
     }
     const maxId = labRecords.reduce((max, lab) => {
         const labId = lab.labId || lab.id || '';
         const num = parseInt(labId.replace('L', ''), 10);
-        return num > max ? num : max;
+        return isNaN(num) ? max : (num > max ? num : max);
     }, 0);
-    return `L${String(maxId + 1).padStart(7, '0')}`;
+    return `L${String(maxId + 1).padStart(7, '0')}-${deviceId}`;
 }
 
 /**
@@ -7422,7 +8009,13 @@ function renderPharmacistCorner() {
     // Get today's completed appointments (status = 'Done')
     const todayAppointments = appointments.filter(appt => {
         const apptDate = appt.appointmentTime ? appt.appointmentTime.split('T')[0] : '';
-        return apptDate === today && appt.status === 'Done';
+        const isDoneToday = apptDate === today && appt.status === 'Done';
+        if (!isDoneToday) return false;
+        
+        // Find doctor to check needInstruction flag
+        const doctor = doctors.find(d => d.name === (appt.doctorName || appt.doctor_name));
+        // Only show if doctor needs instructions (defaults to true if doctor not found or flag not set)
+        return doctor ? (doctor.needInstruction !== false) : true;
     });
 
     // Calculate statistics
@@ -7949,7 +8542,6 @@ async function deleteLabRecord(labId) {
         labRecords.splice(index, 1);
         
         // Save to in-memory array
-        saveLabRecordsToStorage();
         
         // Delete from IndexedDB
         try {
@@ -8050,7 +8642,7 @@ function saveLabRecord(e) {
         showNotification('Lab record created successfully!');
     }
 
-    saveLabRecordsToStorage();
+    saveLabRecordsToStorage(labData.id);
     closeLabFormModal();
     renderLabTracker();
     updatePendingResultsAlert();
@@ -8179,22 +8771,41 @@ function closeTimelineDialog() {
  * @param {string} patientId - Patient ID
  * @param {string} patientName - Patient name
  */
-function togglePatientContacted(patientId, patientName) {
-    const contactKey = `contacted_${patientId}`;
-    
-    // Toggle the status
-    if (window[contactKey]) {
-        delete window[contactKey];
-    } else {
-        window[contactKey] = true;
+async function togglePatientContacted(patientId, patientName) {
+    // Find latest instruction for this patient
+    const patientInstructions = (window.instructions || []).filter(i => i.patientId === patientId);
+    if (patientInstructions.length === 0) {
+        console.warn(`No instructions found for patient ${patientId}. Create an instruction first to track contact status.`);
+        return;
     }
     
-    // Re-render calendar to reflect changes
+    const instruction = patientInstructions[patientInstructions.length - 1];
+    const newContacted = !instruction.contacted;
+    const now = new Date().toISOString();
+    
+    instruction.contacted = newContacted;
+    instruction.updatedAt = now;
+
+    try {
+        if (window.TWOKDB && typeof window.TWOKDB.put === 'function') {
+            await window.TWOKDB.put('instructions', instruction);
+        }
+        if (window.DataLayer && typeof window.DataLayer.saveWithSync === 'function') {
+            await window.DataLayer.saveWithSync('instructions', 'upsert', instruction, instruction.id);
+        }
+    } catch (err) {
+        console.error('[ContactStatus] Failed to save update:', err);
+    }
+
     refreshCalendar();
+    if (elements.todoSection && elements.todoSection.classList.contains('hidden')) {
+        if (window.todoView) window.todoView.render();
+    }
 }
 
 /**
  * Build HTML list of linked lab records
+
  * @param {string} patientId - Patient ID
  * @param {Array} labIds - Array of lab IDs
  * @returns {string} HTML string
@@ -8387,9 +8998,9 @@ function addLabLinkToCalendar(patientId, inputId) {
             if (!targetInst.linkedLabIds.includes(actualLabId)) {
                 targetInst.linkedLabIds.push(actualLabId);
 
-                // Save to storage
-                saveInstructionsToStorage();
-                console.log(`[Calendar] Persisted Lab ID ${actualLabId} to instruction ${targetInst.id}`);
+                                                // Save to storage
+                                                saveInstructionsToStorage(targetInst.id);
+                                                console.log(`[Calendar] Persisted Lab ID ${actualLabId} to instruction ${targetInst.id}`);
             }
         }
     }
@@ -8453,9 +9064,9 @@ function removeLabLinkFromCalendar(patientId, labId, listDivId) {
                     if (instIdx > -1) {
                         targetInst.linkedLabIds.splice(instIdx, 1);
                         
-                        // Save to storage
-                        saveInstructionsToStorage();
-                        console.log(`[Calendar] Persisted Lab ID ${labId} removal from instruction ${targetInst.id}`);
+                                                        // Save to storage
+                                                        saveInstructionsToStorage(targetInst.id);
+                                                        console.log(`[Calendar] Persisted Lab ID ${labId} removal from instruction ${targetInst.id}`);
                     }
                 }
             }
@@ -8768,7 +9379,7 @@ function createLabFromExpense(expenseData) {
     };
 
     labRecords.push(labData);
-    saveLabRecordsToStorage();
+    saveLabRecordsToStorage(labData.id);
     
     // Broadcast to calendar view via WebSocket
     sendQueueEvent('lab_updated', labData);
@@ -9084,9 +9695,9 @@ async function initCalendar() {
 async function loadCalendarData() {
     calendarEvents = {};
 
-    console.log('[Calendar] Loading calendar data...');
-    console.log('[Calendar] Total instructions:', instructions.length);
-    console.log('[Calendar] Total lab records:', labRecords.length);
+    TWOK_LOGGER.info('[Calendar] Loading calendar data...');
+    TWOK_LOGGER.debug('[Calendar] Total instructions:', instructions.length);
+    TWOK_LOGGER.debug('[Calendar] Total lab records:', labRecords.length);
 
     const today = new Date().toISOString().split('T')[0];
 
@@ -9296,7 +9907,7 @@ async function loadCalendarData() {
             const allPendingTests = [...pendingBlood, ...pendingImaging];
 
             // Create display text with doctor name and appointment date
-            const displayText = `${inst.patientName}, ${inst.age || '-'}${phone ? ', ' + phone : ''} | Dr. ${doctorName} | Appt: ${appointmentDate}`;
+            const displayText = `${inst.patientName}, ${inst.age || '-'}${phone ? ', ' + phone : ''} | ${doctorName} | Appt: ${appointmentDate}`;
 
             calendarEvents[date][doctorName].patients.push({
                 type: 'pending',
@@ -9324,6 +9935,9 @@ async function loadCalendarData() {
     const eventDates = Object.keys(calendarEvents);
     console.log(`[Calendar] Generated events for ${eventDates.length} dates:`, eventDates);
     console.log('[Calendar] Calendar events object:', calendarEvents);
+    
+    // Expose globally for TODO view and other components
+    window.calendarEvents = calendarEvents;
 }
 
 /**
@@ -9492,6 +10106,11 @@ function renderCalendar() {
                 const moreEl = document.createElement('div');
                 moreEl.className = 'cal-more-events';
                 moreEl.textContent = `+${remaining} more`;
+                moreEl.style.cursor = 'pointer';
+                moreEl.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    showCalendarDayDetail(dateStr);
+                });
                 eventsContainer.appendChild(moreEl);
             }
         }
@@ -9535,7 +10154,7 @@ function createCalendarEventElement(event, date) {
 /**
  * Show event detail dialog
  */
-function showCalendarEventDetail(event, date) {
+function showCalendarEventDetail(event, date, highlightPatientId = null) {
     const formattedDate = new Date(date + 'T00:00:00').toLocaleDateString('en-US', { 
         weekday: 'short', 
         year: 'numeric', 
@@ -9543,10 +10162,51 @@ function showCalendarEventDetail(event, date) {
         day: 'numeric' 
     });
     
-    let html = `<div style="margin-bottom: 15px;"><strong style="color: #3b82f6;">${escapeHtml(event.doctor)}</strong></div>`;
+    let html = `<div style="margin-bottom: 15px;"><strong style="color: #3b82f6; font-size: 1.1rem;">${escapeHtml(event.doctor)}</strong></div>`;
+    html += renderCalendarPatientListHTML(event.patients, event.doctor, date, highlightPatientId);
+    
+    showCustomDialog(`Events for ${formattedDate}`, html);
+}
 
-    if (event.patients && event.patients.length > 0) {
-        event.patients.forEach(patient => {
+/**
+ * Show all events for a specific date
+ */
+function showCalendarDayDetail(date) {
+    const formattedDate = new Date(date + 'T00:00:00').toLocaleDateString('en-US', { 
+        weekday: 'short', 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+    });
+    
+    if (!calendarEvents[date]) return;
+    
+    const events = Object.values(calendarEvents[date]);
+    let html = '';
+    
+    // Sort doctors alphabetically
+    events.sort((a, b) => a.doctor.localeCompare(b.doctor));
+    
+    events.forEach(event => {
+        html += `<div style="margin-bottom: 25px; padding: 15px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6;">`;
+        html += `<div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">`;
+        html += `<strong style="color: #1e40af; font-size: 1.1rem;">${escapeHtml(event.doctor)}</strong>`;
+        html += `<span style="background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">${event.patients.length} Patients</span>`;
+        html += `</div>`;
+        html += renderCalendarPatientListHTML(event.patients, event.doctor, date);
+        html += `</div>`;
+    });
+    
+    showCustomDialog(`All Events for ${formattedDate}`, html);
+}
+
+/**
+ * Render patient list HTML for calendar dialogs
+ */
+function renderCalendarPatientListHTML(patients, doctorName, date, highlightPatientId = null) {
+    let html = '';
+    if (patients && patients.length > 0) {
+        patients.forEach(patient => {
             let borderColor;
             if (patient.type === 'todo') {
                 borderColor = '#a855f7';
@@ -9559,14 +10219,21 @@ function showCalendarEventDetail(event, date) {
             } else {
                 borderColor = '#8b5cf6';
             }
-
-            html += `<div style="padding: 10px; background: #f9fafb; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid ${borderColor};">`;
-
-            // Add checkbox for patient contact status
+            
             const patientId = patient.instruction?.patientId || '';
+            const isHighlighted = highlightPatientId && patientId === highlightPatientId;
+            const backgroundStyle = isHighlighted ? 'background-color: #eff6ff; outline: 2px solid #3b82f6; outline-offset: -2px;' : '';
+            
+            html += `<div style="padding: 10px; background: white; border-radius: 6px; margin-bottom: 12px; border: 1px solid #e5e7eb; border-left: 4px solid ${borderColor}; shadow: 0 1px 2px rgba(0,0,0,0.05); ${backgroundStyle}">`;
+
+
+            // Add checkbox for patient contact and proceed status
             const patientNameRaw = patient.patientName || '';
-            const contactKey = `contacted_${patientId}`;
-            const isContacted = window[contactKey] || false;
+            const patientInstructions = (window.instructions || []).filter(i => i.patientId === patientId);
+            const latestInstruction = patientInstructions.length > 0 ? patientInstructions[patientInstructions.length - 1] : null;
+             const isContacted = latestInstruction ? latestInstruction.contacted : false;
+             window[`contacted_${patientId}`] = isContacted;
+
 
             // Main row: Checkbox (left) + Patient info (right)
             html += `<div style="display: flex; align-items: center; gap: 10px;">`;
@@ -9580,16 +10247,19 @@ function showCalendarEventDetail(event, date) {
                     title="Mark patient as contacted"
                 />
             `;
-            html += `<div style="flex: 1; font-weight: 500; ${isContacted ? 'text-decoration: line-through; opacity: 0.6;' : ''}">${escapeHtml(patient.patientName)}</div>`;
-            html += `</div>`;
-            
-            // Create Appointment button below patient name
-            const doctorName = event.doctor || '';
+            html += `<div style="flex: 1; font-weight: 600; color: #111827; ${isContacted ? 'text-decoration: line-through; opacity: 0.6;' : ''}">${escapeHtml(patient.patientName)}</div>`;
+             html += `</div>`;
+             
+             // Create Appointment button below patient name
+
             const calendarDate = date;
+            html += `<div style="display: flex; gap: 8px; flex-wrap: wrap;">`;
             html += `<button onclick="window.createAppointmentFromCalendar('${escapeHtml(patient.patientName)}', '${patientId}', '${escapeHtml(doctorName)}', '${calendarDate}')"
                 style="margin-top: 8px; padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;">
                 📅 Create Appointment
             </button>`;
+
+            html += `</div>`;
 
             // TODO specific information
             if (patient.type === 'todo') {
@@ -9641,9 +10311,8 @@ function showCalendarEventDetail(event, date) {
                 }
 
                 // Store in window for access by functions
-                const patientId = patient.instruction?.patientId || '';
-                const patientNameForLookup = patient.instruction?.patientName || '';
-                const storageKey = `calLinkedLabs_${patientId}`;
+                const patientIdForStorage = patient.instruction?.patientId || '';
+                const storageKey = `calLinkedLabs_${patientIdForStorage}`;
 
                 // Always use patient.linkedLabIds (from database) as the source of truth when opening the dialog
                 window[storageKey] = [...(patient.linkedLabIds || [])];
@@ -9782,8 +10451,7 @@ function showCalendarEventDetail(event, date) {
             html += `</div>`;
         });
     }
-    
-    showCustomDialog(`Events for ${formattedDate}`, html);
+    return html;
 }
 
 /**
@@ -10055,6 +10723,34 @@ async function refreshCalendar() {
 function showCalendarLoading(show) {
     elements.calLoading.style.display = show ? 'block' : 'none';
 }
+
+/**
+ * Jump to a specific date in the calendar and show event detail
+ * Exposed globally for TODO view
+ */
+function jumpToCalendarDate(dateString, doctorName, highlightPatientId = null) {
+    if (!dateString || dateString === 'N/A' || dateString === '') return;
+    
+    console.log(`[Calendar] Jumping to ${dateString} for ${doctorName}${highlightPatientId ? ' focusing on patient ' + highlightPatientId : ''}`);
+    
+    // Update global calendar date
+    calendarDate = new Date(dateString + 'T00:00:00');
+    
+    // Switch to calendar section
+    switchSection('calendar');
+    
+    // Show event detail after a small delay to ensure calendar has rendered
+    setTimeout(() => {
+        if (calendarEvents[dateString] && doctorName && calendarEvents[dateString][doctorName]) {
+            showCalendarEventDetail(calendarEvents[dateString][doctorName], dateString, highlightPatientId);
+        } else if (calendarEvents[dateString]) {
+            showCalendarDayDetail(dateString);
+        }
+    }, 300);
+}
+
+// Expose globally
+window.jumpToCalendarDate = jumpToCalendarDate;
 
 // Listen for online/offline events
 window.addEventListener('online', updateCalendarConnectionStatus);
