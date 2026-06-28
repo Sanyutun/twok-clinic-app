@@ -20,7 +20,7 @@
             color: #222;
             min-height: 100vh;
             padding: 2vh;
-            overflow: hidden;
+            overflow: auto;
             display: flex;
             flex-direction: column;
         }
@@ -33,14 +33,15 @@
             display: flex;
             flex-direction: column;
             flex: 1;
-            height: calc(100vh - 4vh);
+            min-height: calc(100vh - 4vh);
+            overflow-x: auto;
         }
 
         /* Screen Containers */
         .screen-container {
             flex: 1;
             position: relative;
-            overflow: hidden;
+            overflow: visible;
             margin-top: 1vh;
         }
 
@@ -53,11 +54,23 @@
             opacity: 0;
             visibility: hidden;
             transition: opacity 0.8s ease-in-out, visibility 0.8s;
+            overflow: auto;
         }
 
         .screen.screen-visible {
             opacity: 1;
             visibility: visible;
+        }
+
+        /* Screen B Pages */
+        .screen-b-page {
+            display: none;
+            width: 100%;
+            min-height: 100%;
+        }
+
+        .screen-b-page.screen-b-visible {
+            display: block;
         }
 
         /* Header */
@@ -111,7 +124,7 @@
             display: flex;
             flex-direction: column;
             gap: 2.5vh;
-            height: 100%;
+            min-height: 100%;
         }
 
         .consultation-section {
@@ -234,7 +247,7 @@
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 2vw;
-            height: 100%;
+            min-height: 100%;
         }
 
         /* Portrait mode: single column */
@@ -281,7 +294,7 @@
             border: 1px solid #e5e5e5;
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            overflow: auto;
         }
 
         .column-header {
@@ -376,6 +389,18 @@
             border-radius: 10px;
             font-size: clamp(12px, 1.8vh, 18px);
             font-weight: 700;
+        }
+
+        .long-wait-badge {
+            display: inline-block;
+            background: #ff7675;
+            color: #fff;
+            padding: 1px 6px;
+            border-radius: 6px;
+            font-size: clamp(10px, 1.5vh, 14px);
+            font-weight: 700;
+            margin-left: 8px;
+            vertical-align: middle;
         }
 
         /* Fullscreen & Status */
@@ -947,15 +972,32 @@
                                     <tbody>
                                         ${leftPatients.length === 0 ?
                                             '<tr><td colspan="5" style="text-align: center; color: #999; padding: 40px;">No patients waiting</td></tr>' :
-                                            leftPatients.map(patient => `
+                                            leftPatients.map(patient => {
+                                                // Check for long wait (more than 2 hours)
+                                                let longWaitBadge = '';
+                                                if (patient.arrivalTime) {
+                                                    const arrivalDate = new Date(patient.arrivalTime);
+                                                    const now = new Date();
+                                                    const diffInMinutes = Math.floor((now - arrivalDate) / 60000);
+                                                    if (diffInMinutes >= 120) {
+                                                        const hours = Math.floor(diffInMinutes / 60);
+                                                        longWaitBadge = `<div class="long-wait-badge">⚠️ ${hours}h+ Wait</div>`;
+                                                    }
+                                                }
+                                                
+                                                return `
                                                 <tr>
-                                                    <td class="col-booking">${patient.bookingNumber}</td>
+                                                    <td class="col-booking">
+                                                        ${patient.bookingNumber}
+                                                        ${longWaitBadge}
+                                                    </td>
                                                     <td class="col-name">${patient.patientName}</td>
                                                     <td class="col-age">${patient.age}</td>
                                                     <td class="col-penalty">${patient.penaltyTurns ? `<span class="penalty-badge">+${patient.penaltyTurns}</span>` : '-'}</td>
                                                     <td class="col-time">${formatTime(patient.arrivalTime)}</td>
                                                 </tr>
-                                            `).join('')
+                                                `;
+                                            }).join('')
                                         }
                                     </tbody>
                                 </table>
@@ -980,15 +1022,32 @@
                                     <tbody>
                                         ${rightPatients.length === 0 ?
                                             '<tr><td colspan="5" style="text-align: center; color: #999; padding: 40px;">No patients waiting</td></tr>' :
-                                            rightPatients.map(patient => `
+                                            rightPatients.map(patient => {
+                                                // Check for long wait (more than 2 hours)
+                                                let longWaitBadge = '';
+                                                if (patient.arrivalTime) {
+                                                    const arrivalDate = new Date(patient.arrivalTime);
+                                                    const now = new Date();
+                                                    const diffInMinutes = Math.floor((now - arrivalDate) / 60000);
+                                                    if (diffInMinutes >= 120) {
+                                                        const hours = Math.floor(diffInMinutes / 60);
+                                                        longWaitBadge = `<div class="long-wait-badge">⚠️ ${hours}h+ Wait</div>`;
+                                                    }
+                                                }
+
+                                                return `
                                                 <tr>
-                                                    <td class="col-booking">${patient.bookingNumber}</td>
+                                                    <td class="col-booking">
+                                                        ${patient.bookingNumber}
+                                                        ${longWaitBadge}
+                                                    </td>
                                                     <td class="col-name">${patient.patientName}</td>
                                                     <td class="col-age">${patient.age}</td>
                                                     <td class="col-penalty">${patient.penaltyTurns ? `<span class="penalty-badge">+${patient.penaltyTurns}</span>` : '-'}</td>
                                                     <td class="col-time">${formatTime(patient.arrivalTime)}</td>
                                                 </tr>
-                                            `).join('')
+                                                `;
+                                            }).join('')
                                         }
                                     </tbody>
                                 </table>
@@ -1175,6 +1234,9 @@
 
             // Update clock every second
             setInterval(updateClock, 1000);
+
+            // Update display every minute to refresh wait times
+            setInterval(updateDisplay, 60000);
 
             // Send heartbeat every 30 seconds to keep connection alive
             setInterval(sendHeartbeat, 30000);

@@ -69,7 +69,7 @@ class CalendarFilterComponent {
                 this.filterDoctor.appendChild(option);
             });
             
-            console.log(`[CalendarFilter] Populated ${doctors.length} doctors in filter`);
+            TWOK_LOGGER.debug(`[CalendarFilter] Populated ${doctors.length} doctors in filter`);
         } catch (error) {
             console.error('[CalendarFilter] Failed to populate doctor filter:', error);
         }
@@ -93,7 +93,7 @@ class CalendarFilterComponent {
         this.filterDoctor.value = '';
         this.filterType.value = '';
 
-        console.log('[CalendarFilter] All filters cleared');
+        TWOK_LOGGER.debug('[CalendarFilter] All filters cleared');
         this.onFilterChange && this.onFilterChange(this.getFilters());
     }
 

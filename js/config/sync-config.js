@@ -49,13 +49,62 @@ window.TWOK_CONFIG = {
 
     // Debug Settings
     DEBUG: {
-        // Enable verbose logging
-        VERBOSE: false,
+        // Enable verbose logging (Global toggle)
+        ENABLED: false,
         
-        // Log sync operations
-        LOG_SYNC: true,
+        // Log levels
+        LEVELS: {
+            DEBUG: 0,
+            INFO: 1,
+            WARN: 2,
+            ERROR: 3
+        },
         
-        // Log realtime events
-        LOG_REALTIME: true
+        // Current log level
+        CURRENT_LEVEL: 2, // WARN
+        
+        // Log sync operations specifically
+        LOG_SYNC: false,
+        
+        // Log realtime events specifically
+        LOG_REALTIME: false
+    }
+};
+
+// Simple Logger Utility
+window.TWOK_LOGGER = {
+    debug: function(...args) {
+        if (window.TWOK_CONFIG.DEBUG.ENABLED && window.TWOK_CONFIG.DEBUG.CURRENT_LEVEL <= 0) {
+            console.log(...args);
+        }
+    },
+    info: function(...args) {
+        if (window.TWOK_CONFIG.DEBUG.ENABLED && window.TWOK_CONFIG.DEBUG.CURRENT_LEVEL <= 1) {
+            console.log(...args);
+        }
+    },
+    log: function(...args) {
+        this.info(...args);
+    },
+    warn: function(...args) {
+        if (window.TWOK_CONFIG.DEBUG.CURRENT_LEVEL <= 2) {
+            console.warn(...args);
+        }
+    },
+    error: function(...args) {
+        if (window.TWOK_CONFIG.DEBUG.CURRENT_LEVEL <= 3) {
+            console.error(...args);
+        }
+    },
+    // Special helpers for sync and realtime
+    sync: function(...args) {
+        if (window.TWOK_CONFIG.DEBUG.LOG_SYNC) {
+            console.log('%c[Sync]', 'color: #2563eb; font-weight: bold;', ...args);
+        }
+    },
+    realtime: function(...args) {
+        if (window.TWOK_CONFIG.DEBUG.LOG_REALTIME) {
+            console.log('%c[Realtime]', 'color: #10b981; font-weight: bold;', ...args);
+        }
     }
 };

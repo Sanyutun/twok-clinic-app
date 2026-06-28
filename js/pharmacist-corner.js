@@ -8,18 +8,34 @@ class PharmacistCornerApp {
         this.appointments = [];
         this.instructions = [];
         this.expenses = [];
+        this.doctors = [];
         this.currentFilter = 'all';
         this.searchTerm = '';
         this.today = this.getTodayDateString();
         
+        // Initialize device ID for unique ID generation in components
+        this.initDeviceId();
+        
         this.init();
+    }
+
+    /**
+     * Initialize device ID
+     */
+    initDeviceId() {
+        let deviceId = localStorage.getItem('twok_device_id');
+        if (!deviceId) {
+            deviceId = Math.random().toString(36).substring(2, 6).toUpperCase();
+            localStorage.setItem('twok_device_id', deviceId);
+        }
+        window.deviceId = deviceId;
     }
 
     /**
      * Initialize application
      */
     async init() {
-        console.log('[PharmacistCorner] Initializing...');
+        TWOK_LOGGER.info('[PharmacistCorner] Initializing...');
         
         // Load data from IndexedDB
         await this.loadData();
@@ -36,7 +52,7 @@ class PharmacistCornerApp {
         // Listen for form submissions
         this.setupFormListeners();
 
-        console.log('[PharmacistCorner] Initialized');
+        TWOK_LOGGER.info('[PharmacistCorner] Initialized');
     }
 
     /**
@@ -58,11 +74,13 @@ class PharmacistCornerApp {
             this.appointments = await this.loadFromIndexedDB('appointments');
             this.instructions = await this.loadFromIndexedDB('instructions');
             this.expenses = await this.loadFromIndexedDB('expenses');
+            this.doctors = await this.loadFromIndexedDB('doctors');
             
-            console.log('[PharmacistCorner] Data loaded:', {
+            TWOK_LOGGER.info('[PharmacistCorner] Data loaded:', {
                 appointments: this.appointments.length,
                 instructions: this.instructions.length,
-                expenses: this.expenses.length
+                expenses: this.expenses.length,
+                doctors: this.doctors.length
             });
         } catch (error) {
             console.error('[PharmacistCorner] Failed to load data:', error);
@@ -119,11 +137,11 @@ class PharmacistCornerApp {
 
         // Listen for online/offline events
         window.addEventListener('online', () => {
-            console.log('[PharmacistCorner] Browser is online');
+            TWOK_LOGGER.info('[PharmacistCorner] Browser is online');
         });
 
         window.addEventListener('offline', () => {
-            console.log('[PharmacistCorner] Browser is offline');
+            TWOK_LOGGER.info('[PharmacistCorner] Browser is offline');
         });
 
         // Listen for instruction/expense saved events
@@ -164,7 +182,7 @@ class PharmacistCornerApp {
                 this.ws = new WebSocket(wsUrl);
                 
                 this.ws.onopen = () => {
-                    console.log('[PharmacistCorner] WebSocket connected');
+                    TWOK_LOGGER.info('[PharmacistCorner] WebSocket connected');
                 };
                 
                 this.ws.onmessage = (event) => {
@@ -177,7 +195,7 @@ class PharmacistCornerApp {
                 };
                 
                 this.ws.onclose = () => {
-                    console.log('[PharmacistCorner] WebSocket disconnected');
+                    TWOK_LOGGER.info('[PharmacistCorner] WebSocket disconnected');
                     // Reconnect after 5 seconds
                     setTimeout(() => this.setupWebSocket(), 5000);
                 };
@@ -221,7 +239,13 @@ class PharmacistCornerApp {
         // Filter appointments with status "Done" from today
         let filtered = this.appointments.filter(appt => {
             const apptDate = appt.appointmentTime ? appt.appointmentTime.split('T')[0] : '';
-            return appt.status === 'Done' && apptDate === this.today;
+            const isDoneToday = appt.status === 'Done' && apptDate === this.today;
+            if (!isDoneToday) return false;
+
+            // Find doctor to check needInstruction flag
+            const doctor = (this.doctors || []).find(d => d.name === (appt.doctor_name || appt.doctorName));
+            // Only show if doctor needs instructions (defaults to true if doctor not found or flag not set)
+            return doctor ? (doctor.needInstruction !== false) : true;
         });
 
         // Apply search filter

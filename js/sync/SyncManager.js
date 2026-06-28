@@ -3,7 +3,7 @@
  * Manages operation queue, conflict resolution, and background sync
  */
 
-console.log('[SyncManager.js] Script loading...');
+TWOK_LOGGER.debug('[SyncManager.js] Script loading...');
 
 class TWOKSyncManager {
     constructor() {
@@ -25,15 +25,16 @@ class TWOKSyncManager {
     init() {
         window.addEventListener('online', () => this.handleOnline());
         window.addEventListener('offline', () => this.handleOffline());
+        window.addEventListener('beforeunload', () => this.flushSaveQueue());
         this.loadQueue();
     }
 
     handleOnline() {
         this.isOnline = true;
-        console.log('[SyncManager] 🌐 Back online!');
+        TWOK_LOGGER.sync('🌐 Back online!');
         // Reset retry counts when coming back online
         this.syncQueue.forEach(op => op.attempts = 0);
-        this.saveQueue();
+        this.flushSaveQueue();
         
         this.sync();
         this.startPeriodicSync();
@@ -42,7 +43,7 @@ class TWOKSyncManager {
 
     handleOffline() {
         this.isOnline = false;
-        console.log('[SyncManager] 📴 Went offline');
+        TWOK_LOGGER.sync('[SyncManager] 📴 Went offline');
         this.stopPeriodicSync();
         this.notifyListeners('connection-change', { online: false });
     }
@@ -52,25 +53,87 @@ class TWOKSyncManager {
         if (savedQueue) {
             try {
                 this.syncQueue = JSON.parse(savedQueue);
-                console.log(`[SyncManager] Loaded ${this.syncQueue.length} queued operations`);
+                TWOK_LOGGER.sync(`[SyncManager] Loaded ${this.syncQueue.length} queued operations`);
             } catch (e) {
-                console.error('[SyncManager] Failed to load queue:', e);
+                TWOK_LOGGER.error('[SyncManager] Failed to load queue:', e);
             }
         }
     }
 
+    /**
+     * Debounced save to localStorage
+     */
     saveQueue() {
+        if (this.saveTimer) clearTimeout(this.saveTimer);
+        this.saveTimer = setTimeout(() => this.flushSaveQueue(), 100);
+    }
+
+    /**
+     * Immediately save queue to localStorage
+     */
+    flushSaveQueue() {
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = null;
+        }
         try {
             localStorage.setItem('sync_queue', JSON.stringify(this.syncQueue));
         } catch (e) {
-            console.error('[SyncManager] Failed to save queue:', e);
+            TWOK_LOGGER.error('[SyncManager] Failed to save queue:', e);
+        }
+    }
+
+    /**
+     * Queue multiple operations at once to minimize disk I/O and overhead
+     * @param {Array<Object>} operations 
+     */
+    bulkQueue(operations) {
+        if (!operations || operations.length === 0) return;
+
+        // 1. Deduplicate: Identify IDs being updated in this batch
+        const incomingIds = new Set();
+        operations.forEach(op => {
+            if (op.operation === 'update' || op.operation === 'delete' || op.operation === 'upsert') {
+                incomingIds.add(`${op.table}:${op.id}`);
+            }
+        });
+
+        // 2. Remove any existing pending operations for these IDs
+        if (incomingIds.size > 0) {
+            const initialLen = this.syncQueue.length;
+            this.syncQueue = this.syncQueue.filter(op => !incomingIds.has(`${op.table}:${op.id}`));
+            if (this.syncQueue.length < initialLen) {
+                TWOK_LOGGER.sync(`[SyncManager] Deduplicated ${initialLen - this.syncQueue.length} operations from queue`);
+            }
+        }
+
+        // 3. Add new operations
+        operations.forEach(operation => {
+            if (operation.attempts === undefined) {
+                operation.attempts = 0;
+            }
+            this.syncQueue.push(operation);
+        });
+
+        // 4. Save and trigger sync
+        this.saveQueue();
+        
+        TWOK_LOGGER.sync(`[SyncManager] Bulk Queued: ${operations.length} operations. Total queue: ${this.syncQueue.length}`);
+        
+        // Try to sync if any operation is fresh
+        if (operations.some(op => op.attempts < this.MAX_RETRIES)) {
+            this.sync();
         }
     }
 
     queue(operation) {
         // Simple deduplication for updates/deletes on same ID
         if (operation.operation === 'update' || operation.operation === 'delete' || operation.operation === 'upsert') {
+            const initialLen = this.syncQueue.length;
             this.syncQueue = this.syncQueue.filter(op => !(op.table === operation.table && op.id === operation.id));
+            if (this.syncQueue.length < initialLen) {
+                TWOK_LOGGER.debug(`[SyncManager] Deduplicated existing operation for ${operation.table}:${operation.id}`);
+            }
         }
         
         // Add retry tracking if not present
@@ -80,13 +143,13 @@ class TWOKSyncManager {
 
         this.syncQueue.push(operation);
         this.saveQueue();
-        console.log(`[SyncManager] Queued: ${operation.operation} on ${operation.table} (Attempt ${operation.attempts})`, operation);
+        TWOK_LOGGER.sync(`[SyncManager] Queued: ${operation.operation} on ${operation.table} (Attempt ${operation.attempts})`, operation);
         
         // Only try to sync if it hasn't exceeded max retries
         if (operation.attempts < this.MAX_RETRIES) {
             this.sync();
         } else {
-            console.log(`[SyncManager] Max retries reached for ${operation.table}:${operation.id}. Waiting for manual sync.`);
+            TWOK_LOGGER.sync(`[SyncManager] Max retries reached for ${operation.table}:${operation.id}. Waiting for manual sync.`);
         }
     }
 
@@ -114,7 +177,7 @@ class TWOKSyncManager {
         try {
             await this.flushQueue();
         } catch (error) {
-            console.error('[SyncManager] Sync failed:', error);
+            TWOK_LOGGER.error('[SyncManager] Sync failed:', error);
         }
     }
 
@@ -123,12 +186,12 @@ class TWOKSyncManager {
      */
     async pullAll(silent = false) {
         if (!this.isOnline) {
-            console.log('[SyncManager] Cannot pull all: Offline');
+            TWOK_LOGGER.sync('[SyncManager] Cannot pull all: Offline');
             if (!silent) throw new Error('You are currently offline. Please connect to the internet to sync.');
             return;
         }
 
-        console.log('[SyncManager] Pulling all data from Supabase...');
+        TWOK_LOGGER.sync('[SyncManager] Pulling all data from Supabase...');
         this.notifyListeners('sync_started', { status: 'full_pull' });
 
         try {
@@ -138,11 +201,11 @@ class TWOKSyncManager {
 
             if (typeof window.DataLayer.syncFromSupabase === 'function') {
                 await window.DataLayer.syncFromSupabase(silent);
-                console.log('[SyncManager] Full pull successful');
+                TWOK_LOGGER.sync('[SyncManager] Full pull successful');
                 this.notifyListeners('sync_completed', { status: 'full_pull_complete' });
             }
         } catch (error) {
-            console.error('[SyncManager] Full pull failed:', error);
+            TWOK_LOGGER.error('[SyncManager] Full pull failed:', error);
             if (!silent && window.showNotification) {
                 window.showNotification('Pull failed: ' + error.message, 'error');
             }
@@ -170,7 +233,7 @@ class TWOKSyncManager {
         }
 
         if (!this.isOnline) {
-            console.log('[SyncManager] Sync deferred: Offline');
+            TWOK_LOGGER.sync('[SyncManager] Sync deferred: Offline');
             throw new Error('Connection lost. Please check your internet connection and try again.');
         }
 
@@ -194,7 +257,7 @@ class TWOKSyncManager {
             sortedOps.forEach(op => op.attempts = (op.attempts || 0) + 1);
             this.saveQueue();
 
-            console.log(`[SyncManager] Flushing ${sortedOps.length} operations to /api/sync`);
+            TWOK_LOGGER.sync(`[SyncManager] Flushing ${sortedOps.length} operations to /api/sync`);
             
             // Map operations and filter out those that shouldn't be synced (mapped to null)
             const mappedOperations = sortedOps
@@ -207,7 +270,7 @@ class TWOKSyncManager {
                 .filter(op => op.table !== null);
 
             if (mappedOperations.length === 0) {
-                console.log('[SyncManager] No valid clinical operations to sync after filtering meta-stores');
+                TWOK_LOGGER.sync('[SyncManager] No valid clinical operations to sync after filtering meta-stores');
                 // Consider these operations "completed" locally
                 this.syncQueue = this.syncQueue.filter(op => !sortedOps.includes(op));
                 this.saveQueue();
@@ -219,7 +282,8 @@ class TWOKSyncManager {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    operations: mappedOperations
+                    operations: mappedOperations,
+                    senderId: window.myClientId || window.clientId || (typeof myClientId !== 'undefined' ? myClientId : null)
                 })
             });
 
@@ -230,14 +294,14 @@ class TWOKSyncManager {
                 } catch (e) {
                     errorData = { error: 'Unknown server error' };
                 }
-                console.error('[SyncManager] Server error details:', errorData);
+                TWOK_LOGGER.error('[SyncManager] Server error details:', errorData);
                 throw new Error(errorData.error || `Server error: ${response.status}`);
             }
 
             const result = await response.json();
 
             if (result.success) {
-                console.log(`[SyncManager] ✅ Synced ${sortedOps.length} operations`);
+                TWOK_LOGGER.sync(`[SyncManager] ✅ Synced ${sortedOps.length} operations`);
                 
                 // Clear successfully synced operations
                 this.syncQueue = this.syncQueue.filter(op => !sortedOps.includes(op));
@@ -251,7 +315,7 @@ class TWOKSyncManager {
                 this.isSyncing = false; 
 
                 if (this.syncQueue.length > 0 && this.syncQueue.some(op => op.attempts < this.MAX_RETRIES)) {
-                    setTimeout(() => this.sync(), 1000);
+                    setTimeout(() => this.sync(), 0);
                 }
 
                 return { synced: sortedOps.length };
@@ -260,7 +324,7 @@ class TWOKSyncManager {
             }
         } catch (error) {
             this.isSyncing = false;
-            console.error('[SyncManager] ❌ Sync failed:', error);
+            TWOK_LOGGER.error('[SyncManager] ❌ Sync failed:', error);
             
             this.consecutiveFailures++;
             this.currentInterval = Math.min(this.SYNC_INTERVAL * Math.pow(2, this.consecutiveFailures), this.MAX_INTERVAL);
@@ -344,10 +408,10 @@ class TWOKSyncManager {
             }
 
             const result = await response.json();
-            console.log(`[SyncManager] ✅ Immediate sync successful: ${operation} on ${table}`);
+            TWOK_LOGGER.sync(`[SyncManager] ✅ Immediate sync successful: ${operation} on ${table}`);
             return result;
         } catch (error) {
-            console.warn(`[SyncManager] Immediate sync failed for ${table}, queuing...`, error);
+            TWOK_LOGGER.warn(`[SyncManager] Immediate sync failed for ${table}, queuing...`, error);
             // Queue it with 1 attempt already used
             this.queue({ table, operation, data, id, attempts: 1 });
             throw error;
@@ -355,31 +419,47 @@ class TWOKSyncManager {
     }
 
     // ==========================================
-    // PERIODIC SYNC
+    // PERIODIC SYNC (DISABLED - Using Event-Driven & Visibility-Based Sync)
     // ==========================================
     startPeriodicSync() {
         this.stopPeriodicSync(); // Clear existing timer
         
         if (!this.isOnline) {
-            console.log('[SyncManager] Periodic sync suspended (offline)');
+            TWOK_LOGGER.sync('[SyncManager] Sync suspended (offline)');
             return;
         }
 
-        this.syncTimer = setInterval(() => {
-            if (this.isOnline && !this.isSyncing) {
-                // Bi-directional sync: pull updates from Supabase AND push queued changes
-                this.pullAll(true);
-            }
-        }, this.currentInterval);
-
-        console.log('[SyncManager] Periodic sync active (interval:', this.currentInterval / 1000, 'seconds)');
+        // We disable polling because we use Realtime + WebSockets + Visibility changes
+        // This makes the app much more efficient.
+        TWOK_LOGGER.sync('[SyncManager] Event-driven sync active (Polling disabled)');
+        
+        // Setup visibility listener if not already done
+        if (!this.visibilityListenerAdded) {
+            // FIX: Only pull when tab becomes visible IF enough time has passed.
+            // Prevents hammering Supabase with full re-fetches on every alt-tab.
+            const VISIBILITY_PULL_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible' && this.isOnline) {
+                    const now = Date.now();
+                    const lastPull = this._lastVisibilityPull || 0;
+                    if (now - lastPull < VISIBILITY_PULL_COOLDOWN_MS) {
+                        TWOK_LOGGER.sync(`[SyncManager] Tab visible: skipping pull (last pull was ${Math.round((now - lastPull) / 1000)}s ago, cooldown is ${VISIBILITY_PULL_COOLDOWN_MS / 1000}s)`);
+                        return;
+                    }
+                    this._lastVisibilityPull = now;
+                    TWOK_LOGGER.sync('[SyncManager] Tab visible: triggering pull-to-refresh (cooldown passed)');
+                    this.pullAll(true);
+                }
+            });
+            this.visibilityListenerAdded = true;
+        }
     }
 
     stopPeriodicSync() {
         if (this.syncTimer) {
             clearInterval(this.syncTimer);
             this.syncTimer = null;
-            console.log('[SyncManager] Periodic sync stopped');
+            TWOK_LOGGER.sync('[SyncManager] Periodic sync stopped');
         }
     }
 
@@ -437,7 +517,7 @@ class TWOKSyncManager {
             try {
                 listener(event, data);
             } catch (error) {
-                console.error('[SyncManager] Listener error:', error);
+                TWOK_LOGGER.error('[SyncManager] Listener error:', error);
             }
         });
     }
@@ -456,7 +536,7 @@ class TWOKSyncManager {
 }
 
 // Export singleton instance
-console.log('[SyncManager] Initializing singleton...');
+TWOK_LOGGER.debug('[SyncManager] Initializing singleton...');
 const twokSyncManager = new TWOKSyncManager();
 
 // Primary export
@@ -467,10 +547,10 @@ try {
     // Only overwrite if it's not the native browser SyncManager or if it's undefined
     if (!window.SyncManager || (typeof window.SyncManager === 'function' && !window.SyncManager.prototype.pullAll)) {
         window.SyncManager = twokSyncManager;
-        console.log('[SyncManager] Singleton registered as window.SyncManager');
+        TWOK_LOGGER.info('[SyncManager] Singleton registered as window.SyncManager');
     }
 } catch (e) {
-    console.warn('[SyncManager] Could not set window.SyncManager (likely a browser conflict):', e);
+    TWOK_LOGGER.warn('[SyncManager] Could not set window.SyncManager (likely a browser conflict):', e);
 }
 
-console.log('[SyncManager] Singleton registered as window.twokSyncManager:', window.twokSyncManager);
+TWOK_LOGGER.info('[SyncManager] Singleton registered as window.twokSyncManager:', window.twokSyncManager);

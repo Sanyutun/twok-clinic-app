@@ -21,7 +21,7 @@ class WebSocketClient {
      */
     connect() {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-            console.log('[WebSocket] Already connected');
+            TWOK_LOGGER.debug('[WebSocket] Already connected');
             return;
         }
 
@@ -29,7 +29,7 @@ class WebSocketClient {
             this.socket = new WebSocket(this.url);
 
             this.socket.onopen = () => {
-                console.log('[WebSocket] Connected');
+                TWOK_LOGGER.debug('[WebSocket] Connected');
                 this.isConnected = true;
                 this.notifyListeners('connect');
                 
@@ -43,7 +43,7 @@ class WebSocketClient {
             this.socket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    console.log('[WebSocket] Message received:', data.type);
+                    TWOK_LOGGER.debug('[WebSocket] Message received:', data.type);
                     this.notifyListeners(data.type, data);
                 } catch (error) {
                     console.error('[WebSocket] Error parsing message:', error);
@@ -51,7 +51,7 @@ class WebSocketClient {
             };
 
             this.socket.onclose = (event) => {
-                console.log('[WebSocket] Disconnected:', event.code, event.reason);
+                TWOK_LOGGER.debug('[WebSocket] Disconnected:', event.code, event.reason);
                 this.isConnected = false;
                 this.notifyListeners('disconnect', { code: event.code, reason: event.reason });
                 
@@ -78,7 +78,7 @@ class WebSocketClient {
             return;
         }
 
-        console.log(`[WebSocket] Reconnecting in ${CONFIG.WEBSOCKET_RECONNECT_INTERVAL}ms...`);
+        TWOK_LOGGER.debug(`[WebSocket] Reconnecting in ${CONFIG.WEBSOCKET_RECONNECT_INTERVAL}ms...`);
         this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null;
             this.connect();

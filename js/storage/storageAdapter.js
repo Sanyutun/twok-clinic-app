@@ -30,7 +30,7 @@ class StorageAdapter {
     async init() {
         await indexedDBStorage.openDB();
         await this.loadCache();
-        console.log('[StorageAdapter] Initialized');
+        TWOK_LOGGER.debug('[StorageAdapter] Initialized');
     }
 
     /**
@@ -51,7 +51,7 @@ class StorageAdapter {
             // Load from localStorage for backward compatibility
             this.loadFromLocalStorage();
 
-            console.log('[StorageAdapter] Cache loaded');
+            TWOK_LOGGER.debug('[StorageAdapter] Cache loaded');
         } catch (error) {
             console.error('[StorageAdapter] Failed to load cache:', error);
         }
@@ -118,7 +118,7 @@ class StorageAdapter {
         const cacheKey = mapping[storeName];
         if (cacheKey && this.cache[cacheKey]) {
             this.cache[cacheKey] = data;
-            // console.log(`[StorageAdapter] Cache updated for ${storeName} (${data.length} items)`);
+            // TWOK_LOGGER.debug(`[StorageAdapter] Cache updated for ${storeName} (${data.length} items)`);
         }
     }
 

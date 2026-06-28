@@ -338,7 +338,7 @@ class InstructionFormComponent {
         }
 
         const instructionData = {
-            id: 'inst_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            id: `inst_${Date.now()}_${window.deviceId || localStorage.getItem('twok_device_id') || 'DEV'}_${Math.random().toString(36).substr(2, 5)}`,
             appointmentId: apptId,
             patientId: appointment.patient_id || appointment.patientId,
             patientName: appointment.patient_name || appointment.patientName,

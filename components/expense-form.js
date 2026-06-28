@@ -88,7 +88,7 @@ class ExpenseFormComponent {
             select.insertBefore(option, customOption);
         });
         
-        console.log(`[ExpenseForm] Loaded ${customTypes.length} custom expense types into dropdown`);
+        TWOK_LOGGER.debug(`[ExpenseForm] Loaded ${customTypes.length} custom expense types into dropdown`);
     }
 
     /**
@@ -586,7 +586,7 @@ class ExpenseFormComponent {
                 
                 if (matchingLab) {
                     this.editingLabId = matchingLab.labId || matchingLab.id;
-                    console.log('[ExpenseForm] Found existing lab entry by expenseId:', this.editingLabId);
+                    TWOK_LOGGER.debug('[ExpenseForm] Found existing lab entry by expenseId:', this.editingLabId);
                 } else {
                     // Fallback: try to find by patientId + amount + dateTime (legacy matching)
                     const fallbackLab = labRecords.find(lab =>
@@ -596,11 +596,11 @@ class ExpenseFormComponent {
                     );
                     if (fallbackLab) {
                         this.editingLabId = fallbackLab.labId || fallbackLab.id;
-                        console.log('[ExpenseForm] Found existing lab entry by fallback match:', this.editingLabId);
+                        TWOK_LOGGER.debug('[ExpenseForm] Found existing lab entry by fallback match:', this.editingLabId);
                     }
                 }
             } catch (err) {
-                console.warn('[ExpenseForm] Could not find associated lab entry:', err);
+                TWOK_LOGGER.warn('[ExpenseForm] Could not find associated lab entry:', err);
             }
         }
 
@@ -735,7 +735,7 @@ class ExpenseFormComponent {
     async handleSubmit() {
         // Prevent double submissions
         if (this.isSubmitting) {
-            console.log('[ExpenseForm] ⚠️ Submission already in progress, ignoring duplicate request');
+            TWOK_LOGGER.debug('[ExpenseForm] ⚠️ Submission already in progress, ignoring duplicate request');
             return;
         }
 
@@ -820,7 +820,7 @@ class ExpenseFormComponent {
 
         // Build expense data in legacy format for compatibility with Expenses tab
         const expenseData = {
-            id: this.editingExpenseId || ('EXP' + Date.now()),
+            id: this.editingExpenseId || `EXP${Date.now()}-${window.deviceId || localStorage.getItem('twok_device_id') || 'DEV'}`,
             amount: amount,
             category: expenseType,
             remark: itemName || null,
@@ -847,33 +847,33 @@ class ExpenseFormComponent {
             // CRITICAL: Always save to IndexedDB first, regardless of what happens next
             if (this.isEditing && this.editingExpenseId) {
                 await this.updateExpenseInIndexedDB(expenseData);
-                console.log('[ExpenseForm] ✅ Expense updated in IndexedDB:', expenseData.id);
+                TWOK_LOGGER.debug('[ExpenseForm] ✅ Expense updated in IndexedDB:', expenseData.id);
             } else {
                 await this.saveExpenseToIndexedDB(expenseData);
-                console.log('[ExpenseForm] ✅ Expense saved to IndexedDB:', expenseData.id);
+                TWOK_LOGGER.debug('[ExpenseForm] ✅ Expense saved to IndexedDB:', expenseData.id);
             }
 
             // If Lab expense, create or update lab tracker entry
             if (expenseType === 'Lab' || expenseType === 'Lab Test') {
-                console.log('[ExpenseForm] 🧪 Lab expense detected, creating/updating lab tracker entry...');
+                TWOK_LOGGER.debug('[ExpenseForm] 🧪 Lab expense detected, creating/updating lab tracker entry...');
                 try {
                     const labData = this.prepareLabData(expenseData);
-                    console.log('[ExpenseForm] Lab data prepared:', JSON.stringify(labData, null, 2));
+                    TWOK_LOGGER.debug('[ExpenseForm] Lab data prepared:', JSON.stringify(labData, null, 2));
 
                     if (this.isEditing && this.editingLabId) {
                         // Update existing lab entry
-                        console.log('[ExpenseForm] Updating existing lab entry:', this.editingLabId);
+                        TWOK_LOGGER.debug('[ExpenseForm] Updating existing lab entry:', this.editingLabId);
                         await this.updateLabInIndexedDB(labData);
-                        console.log('[ExpenseForm] ✅ Lab tracker entry updated:', labData.labId);
+                        TWOK_LOGGER.debug('[ExpenseForm] ✅ Lab tracker entry updated:', labData.labId);
                     } else {
                         // Create new lab entry
                         await this.saveLabToIndexedDB(labData);
-                        console.log('[ExpenseForm] ✅ Lab tracker entry created:', labData.labId);
+                        TWOK_LOGGER.debug('[ExpenseForm] ✅ Lab tracker entry created:', labData.labId);
                     }
 
                     // Refresh lab tracker in main UI if available
                     if (typeof window.reloadLabTracker === 'function') {
-                        console.log('[ExpenseForm] Calling window.reloadLabTracker()...');
+                        TWOK_LOGGER.debug('[ExpenseForm] Calling window.reloadLabTracker()...');
                         await window.reloadLabTracker();
                     } else {
                         console.warn('[ExpenseForm] window.reloadLabTracker not available');
@@ -883,24 +883,24 @@ class ExpenseFormComponent {
                 }
             }
 
-            console.log('[ExpenseForm] ✅ Expense saved successfully!');
+            TWOK_LOGGER.debug('[ExpenseForm] ✅ Expense saved successfully!');
 
             // Re-render expenses table if function exists
-            console.log('[ExpenseForm] renderExpenses available:', typeof window.renderExpenses === 'function');
+            TWOK_LOGGER.debug('[ExpenseForm] renderExpenses available:', typeof window.renderExpenses === 'function');
             if (typeof window.renderExpenses === 'function') {
                 try {
-                    console.log('[ExpenseForm] Calling renderExpenses...');
+                    TWOK_LOGGER.debug('[ExpenseForm] Calling renderExpenses...');
                     window.renderExpenses();
-                    console.log('[ExpenseForm] renderExpenses completed successfully');
+                    TWOK_LOGGER.debug('[ExpenseForm] renderExpenses completed successfully');
                 } catch (error) {
                     console.error('[ExpenseForm] Error calling renderExpenses:', error);
                 }
             }
             if (typeof window.renderCategorySummary === 'function') {
                 try {
-                    console.log('[ExpenseForm] Calling renderCategorySummary...');
+                    TWOK_LOGGER.debug('[ExpenseForm] Calling renderCategorySummary...');
                     window.renderCategorySummary();
-                    console.log('[ExpenseForm] renderCategorySummary completed successfully');
+                    TWOK_LOGGER.debug('[ExpenseForm] renderCategorySummary completed successfully');
                 } catch (error) {
                     console.error('[ExpenseForm] Error calling renderCategorySummary:', error);
                 }
@@ -911,7 +911,7 @@ class ExpenseFormComponent {
                 window.dispatchEvent(new CustomEvent('expense-saved', {
                     detail: expenseData
                 }));
-                console.log('[ExpenseForm] expense-saved event dispatched');
+                TWOK_LOGGER.debug('[ExpenseForm] expense-saved event dispatched');
             } catch (eventError) {
                 console.warn('[ExpenseForm] Failed to dispatch event:', eventError);
             }
@@ -919,7 +919,7 @@ class ExpenseFormComponent {
             // Show notification
             try {
                 this.showNotification('Expense saved successfully! ✓', 'success');
-                console.log('[ExpenseForm] Notification shown');
+                TWOK_LOGGER.debug('[ExpenseForm] Notification shown');
             } catch (notifError) {
                 console.warn('[ExpenseForm] Failed to show notification:', notifError);
             }
@@ -928,7 +928,7 @@ class ExpenseFormComponent {
             setTimeout(() => {
                 try {
                     this.hide();
-                    console.log('[ExpenseForm] Form hidden');
+                    TWOK_LOGGER.debug('[ExpenseForm] Form hidden');
                 } catch (hideError) {
                     console.error('[ExpenseForm] Failed to hide form:', hideError);
                 }
@@ -961,9 +961,9 @@ class ExpenseFormComponent {
             const maxId = labRecords.length > 0 ? labRecords.reduce((max, lab) => {
                 const id = lab.labId || lab.id || '';
                 const num = parseInt(id.replace('L', ''), 10);
-                return num > max ? num : max;
+                return isNaN(num) ? max : (num > max ? num : max);
             }, 0) : 0;
-            labId = `L${String(maxId + 1).padStart(7, '0')}`;
+            labId = `L${String(maxId + 1).padStart(7, '0')}-${window.deviceId || localStorage.getItem('twok_device_id') || 'DEV'}`;
         }
 
         return {
@@ -1001,7 +1001,7 @@ class ExpenseFormComponent {
         // Save to IndexedDB
         await this.saveLabToIndexedDB(labData);
 
-        console.log('[ExpenseForm] Lab tracker entry created:', labData);
+        TWOK_LOGGER.debug('[ExpenseForm] Lab tracker entry created:', labData);
     }
 
     /**
@@ -1011,7 +1011,7 @@ class ExpenseFormComponent {
         try {
             if (window.TWOKDB) {
                 await window.TWOKDB.put(window.TWOKDB.STORES.EXPENSES, data);
-                console.log('[ExpenseForm] Successfully saved to IndexedDB:', data.id);
+                TWOK_LOGGER.debug('[ExpenseForm] Successfully saved to IndexedDB:', data.id);
             } else {
                 // Fallback to direct IndexedDB
                 return new Promise((resolve, reject) => {

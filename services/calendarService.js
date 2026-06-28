@@ -301,7 +301,7 @@ class CalendarService {
             if (!exists) {
                 const appointmentDate = inst.appointmentDate || inst.createdTime?.split('T')[0] || 'N/A';
                 const allPendingTests = [...pendingBlood, ...pendingImaging];
-                const displayText = `${inst.patientName}, ${inst.age || '-'}${inst.phone ? ', ' + inst.phone : ''} | Dr. ${doctorName} | Appt: ${appointmentDate}`;
+                const displayText = `${inst.patientName}, ${inst.age || '-'}${inst.phone ? ', ' + inst.phone : ''} | ${doctorName} | Appt: ${appointmentDate}`;
 
                 this.calendarEvents[date][doctorName].patients.push({
                     type: 'pending',

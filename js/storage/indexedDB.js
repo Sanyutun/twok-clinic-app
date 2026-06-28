@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = 'TWOK_Clinic_DB';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 const STORES = {
     PATIENTS: 'patients',

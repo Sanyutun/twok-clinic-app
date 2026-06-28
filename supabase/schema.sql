@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS doctors (
     speciality VARCHAR(255),
     hospital VARCHAR(255),
     phone VARCHAR(50),
+    need_instruction BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     _sync_status VARCHAR(20) DEFAULT 'synced',

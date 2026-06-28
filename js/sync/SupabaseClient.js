@@ -23,14 +23,14 @@ class SupabaseClient {
         }
 
         if (this.initializing) {
-            console.log('[SupabaseClient] Initialization already in progress, waiting...');
+            TWOK_LOGGER.realtime('[SupabaseClient] Initialization already in progress, waiting...');
             return this.initPromise;
         }
 
         this.initializing = true;
         this.initPromise = (async () => {
             try {
-                console.log('[SupabaseClient] Starting initialization...');
+                TWOK_LOGGER.realtime('[SupabaseClient] Starting initialization...');
                 
                 if (!url || !key) {
                     throw new Error('Supabase URL or Key is missing');
@@ -52,7 +52,7 @@ class SupabaseClient {
 
                 this.initialized = true;
                 this.initializing = false;
-                console.log('[SupabaseClient] ✅ Initialized successfully');
+                TWOK_LOGGER.realtime('[SupabaseClient] ✅ Initialized successfully');
             } catch (error) {
                 this.initializing = false;
                 this.initialized = false;
@@ -228,7 +228,7 @@ class SupabaseClient {
      */
     async subscribe(table, callback, options = {}) {
         if (!navigator.onLine) {
-            console.log(`[SupabaseClient] 📴 Offline: skipping subscription for ${table}`);
+            TWOK_LOGGER.realtime(`[SupabaseClient] 📴 Offline: skipping subscription for ${table}`);
             return null;
         }
 
@@ -248,7 +248,7 @@ class SupabaseClient {
                     table
                 },
                 (payload) => {
-                    console.log(`[SupabaseClient] 📡 ${table} ${event}:`, payload.new || payload.old);
+                    TWOK_LOGGER.realtime(`[SupabaseClient] 📡 ${table} ${event}:`, payload.new || payload.old);
                     callback(event.toLowerCase(), payload.new || payload.old);
                 }
             );
@@ -256,18 +256,19 @@ class SupabaseClient {
 
         const subscription = await channel.subscribe((status, err) => {
             if (status === 'SUBSCRIBED') {
-                console.log(`[SupabaseClient] ✅ Subscribed to ${table}`);
+                TWOK_LOGGER.realtime(`[SupabaseClient] ✅ Subscribed to ${table}`);
             } else if (status === 'CHANNEL_ERROR') {
                 // Only log if still online to reduce noise
                 if (navigator.onLine) {
-                    console.error(`[SupabaseClient] ❌ Channel error for ${table}:`, err);
+                   // const errMsg = err ?? 'No error details provided (check Realtime is enabled for this table in Supabase dashboard, and that RLS policies allow SELECT)';
+                   // console.error(`[SupabaseClient] ❌ Channel error for ${table}:`, errMsg);
                 }
             } else if (status === 'TIMED_OUT') {
                 if (navigator.onLine) {
                     console.warn(`[SupabaseClient] ⚠️ Subscription timed out for ${table}`);
                 }
             } else {
-                console.log(`[SupabaseClient] Subscription status for ${table}:`, status);
+                TWOK_LOGGER.realtime(`[SupabaseClient] Subscription status for ${table}:`, status);
             }
         });
 
@@ -285,7 +286,7 @@ class SupabaseClient {
         if (subscription) {
             await this.client.removeChannel(subscription.channel);
             this.subscriptions.delete(subscriptionId);
-            console.log(`[SupabaseClient] ❌ Unsubscribed from ${subscription.table}`);
+            TWOK_LOGGER.realtime(`[SupabaseClient] ❌ Unsubscribed from ${subscription.table}`);
         }
     }
 
@@ -296,7 +297,7 @@ class SupabaseClient {
         const promises = Array.from(this.subscriptions.keys()).map(id => this.unsubscribe(id));
         await Promise.all(promises);
         this.subscriptions.clear();
-        console.log('[SupabaseClient] ❌ Unsubscribed from all channels');
+        TWOK_LOGGER.realtime('[SupabaseClient] ❌ Unsubscribed from all channels');
     }
 
     // ==========================================

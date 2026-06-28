@@ -57,7 +57,51 @@ class CalendarEventComponent {
     }
 
     /**
-     * Show event detail dialog
+     * Show all events for a specific date
+     * @param {string} date - Date string YYYY-MM-DD
+     */
+    showDayDetail(date) {
+        if (!this.dialog || !this.dialogContent) {
+            console.error('[CalendarEvent] Dialog not initialized');
+            return;
+        }
+
+        const events = window.calendarService.getEventsForDate(date);
+        if (!events || events.length === 0) return;
+
+        // Store date for use in appointment buttons
+        this.currentDate = date;
+
+        const formattedDate = this.formatDate(date);
+        document.getElementById('eventDialogTitle').textContent = `All Events for ${formattedDate}`;
+
+        let html = '<div class="day-detail-container">';
+        
+        // Sort events by doctor name
+        const sortedEvents = [...events].sort((a, b) => a.doctor.localeCompare(b.doctor));
+        
+        sortedEvents.forEach(doctorEvent => {
+            html += `
+                <div class="doctor-events-group" style="margin-bottom: 20px; padding: 15px; background: #f9fafb; border-radius: 8px; border-left: 4px solid #3b82f6;">
+                    <div class="doctor-header" style="display: flex; align-items: center; margin-bottom: 12px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">
+                        <span style="font-size: 1.1rem; font-weight: bold; color: #1e40af;">${this.escapeHtml(doctorEvent.doctor)}</span>
+                        <span style="margin-left: auto; background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">
+                            ${doctorEvent.patients.length} Patient${doctorEvent.patients.length > 1 ? 's' : ''}
+                        </span>
+                    </div>
+                    ${this.renderPatientList(doctorEvent.patients, doctorEvent.doctor, date)}
+                </div>
+            `;
+        });
+        
+        html += '</div>';
+        
+        this.dialogContent.innerHTML = html;
+        this.dialog.classList.remove('hidden');
+    }
+
+    /**
+     * Show event detail dialog for a specific doctor
      * @param {Object} doctorEvent - Doctor event data
      * @param {string} date - Date string
      */
@@ -77,128 +121,132 @@ class CalendarEventComponent {
         let html = `
             <div class="event-detail-section">
                 <div class="event-detail-label">Doctor</div>
-                <div class="event-detail-value doctor">${this.escapeHtml(doctorEvent.doctor)}</div>
+                <div class="event-detail-value doctor" style="font-size: 1.1rem; font-weight: bold; color: #1e40af; margin-bottom: 12px;">
+                    ${this.escapeHtml(doctorEvent.doctor)}
+                </div>
+            </div>
+            <div class="event-detail-section">
+                <div class="event-detail-label">Patients (${doctorEvent.patients.length})</div>
+                ${this.renderPatientList(doctorEvent.patients, doctorEvent.doctor, date)}
             </div>
         `;
         
-        if (doctorEvent.patients && doctorEvent.patients.length > 0) {
-            html += `
-                <div class="event-detail-section">
-                    <div class="event-detail-label">Patients (${doctorEvent.patients.length})</div>
-                    <div class="event-detail-value patient-list">
-            `;
-            
-            doctorEvent.patients.forEach(patient => {
-                const instruction = patient.instruction || {};
-                const typeClass = patient.type || 'follow-up';
-                const patientId = instruction.patientId || patient.patientId || '';
-                const doctorName = this.currentDoctor || '';
-                const calendarDate = this.currentDate || '';
-                
-                html += `
-                    <div class="event-patient-item ${typeClass}">
-                        <div class="event-patient-name">${this.escapeHtml(patient.displayText)}</div>
-                `;
-
-                // Add "Create Appointment" and "Instruction" buttons
-                html += `
-                    <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
-                        <button onclick="window.createAppointmentFromCalendar('${this.escapeHtml(patient.displayText).replace(/'/g, "\\'")}', '${patientId}', '${this.escapeHtml(doctorName).replace(/'/g, "\\'")}', '${calendarDate}')" 
-                            style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;">
-                            📅 Appointment
-                        </button>
-                        <button onclick="window.recordInstructionFromCalendar('${this.escapeHtml(JSON.stringify(patient).replace(/'/g, "\\'"))}')" 
-                            style="padding: 6px 12px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;">
-                            📝 Instruction
-                        </button>
-                    </div>
-                `;
-
-                // Show tests if present
-                if (patient.tests && patient.tests.length > 0) {
-                    html += `
-                        <div class="event-patient-tests">
-                            <strong>→ Tests:</strong> ${patient.tests.map(t => this.escapeHtml(t)).join(', ')}
-                        </div>
-                    `;
-                }
-
-                // Show combined pending tests (both blood and imaging) or After Results status
-                if (patient.type === 'pending') {
-                    html += `<div class="event-patient-tests">`;
-                    
-                    if (patient.pendingTests && patient.pendingTests.all && patient.pendingTests.all.length > 0) {
-                        html += `<strong style="color: #f59e0b;">⏳ Pending Tests:</strong>`;
-
-                        // Blood tests with status
-                        if (patient.pendingTests.blood && patient.pendingTests.blood.length > 0) {
-                            patient.pendingTests.blood.forEach(test => {
-                                const status = patient.bloodTestStatus?.[test] || 'Not Started';
-                                html += `<div style="margin-top: 3px; color: #f97316;">• ${this.escapeHtml(test)} <span style="color: #6b7280; font-size: 0.75rem;">(${this.escapeHtml(status)})</span></div>`;
-                            });
-                        }
-
-                        // Imaging tests
-                        if (patient.pendingTests.imaging && patient.pendingTests.imaging.length > 0) {
-                            patient.pendingTests.imaging.forEach(test => {
-                                html += `<div style="margin-top: 3px; color: #8b5cf6;">• ${this.escapeHtml(test)}</div>`;
-                            });
-                        }
-                    } else {
-                        html += `<strong style="color: #10b981;">📋 After Results Consultation</strong>`;
-                        html += `<div style="margin-top: 3px; color: #6b7280; font-size: 0.85rem;">Waiting for patient to return with results.</div>`;
-                    }
-
-                    // Show Lab IDs if present
-                    if (patient.labRecords && patient.labRecords.length > 0) {
-                        const labIds = [...new Set(patient.labRecords.map(lab => lab.id || lab.labId))].filter(Boolean);
-                        if (labIds.length > 0) {
-                            html += `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e5e7eb;">
-                                <strong style="color: #3b82f6;">🔬 Lab Tracker ID:</strong> 
-                                <span style="background: #eff6ff; color: #1e40af; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-weight: bold;">${labIds.join(', ')}</span>
-                            </div>`;
-                        }
-                    }
-
-                    html += `</div>`;
-                }
-
-                // Show instruction note if present
-                if (instruction.generalInstruction) {
-                    html += `
-                        <div class="event-patient-tests" style="margin-top: 6px; font-style: italic; color: #6b7280;">
-                            "${this.escapeHtml(instruction.generalInstruction)}"
-                        </div>
-                    `;
-                }
-                
-                // Show next appointment date
-                if (instruction.nextAppointmentDate) {
-                    html += `
-                        <div class="event-patient-tests">
-                            <strong>Next Visit:</strong> ${this.formatDate(instruction.nextAppointmentDate)}
-                        </div>
-                    `;
-                }
-                
-                // Show return duration
-                if (instruction.returnDuration) {
-                    const unit = instruction.returnUnit || 'Days';
-                    html += `
-                        <div class="event-patient-tests">
-                            <strong>Return after:</strong> ${instruction.returnDuration} ${unit.toLowerCase()}
-                        </div>
-                    `;
-                }
-                
-                html += `</div>`;
-            });
-            
-            html += `</div></div>`;
-        }
-        
         this.dialogContent.innerHTML = html;
         this.dialog.classList.remove('hidden');
+    }
+
+    /**
+     * Render patient list HTML
+     * @param {Array} patients 
+     * @param {string} doctorName 
+     * @param {string} date 
+     * @returns {string}
+     */
+    renderPatientList(patients, doctorName, date) {
+        let html = '<div class="patient-list">';
+        
+        patients.forEach(patient => {
+            const instruction = patient.instruction || {};
+            const typeClass = patient.type || 'follow-up';
+            const patientId = instruction.patientId || patient.patientId || '';
+            
+            html += `
+                <div class="event-patient-item ${typeClass}" style="margin-bottom: 12px; padding: 10px; border-radius: 6px; border: 1px solid #e5e7eb; background: white;">
+                    <div class="event-patient-name" style="font-weight: 600; color: #111827;">${this.escapeHtml(patient.displayText)}</div>
+            `;
+
+            // Add "Create Appointment" button
+            html += `
+                <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+                    <button onclick="window.createAppointmentFromCalendar('${this.escapeHtml(patient.displayText).replace(/'/g, "\\'")}', '${patientId}', '${this.escapeHtml(doctorName).replace(/'/g, "\\'")}', '${date}')" 
+                        style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;">
+                        📅 Appointment
+                    </button>
+                </div>
+            `;
+
+            // Show tests if present
+            if (patient.tests && patient.tests.length > 0) {
+                html += `
+                    <div class="event-patient-tests" style="margin-top: 8px; font-size: 0.85rem; color: #4b5563;">
+                        <strong>→ Tests:</strong> ${patient.tests.map(t => this.escapeHtml(t)).join(', ')}
+                    </div>
+                `;
+            }
+
+            // Show combined pending tests (both blood and imaging) or After Results status
+            if (patient.type === 'pending') {
+                html += `<div class="event-patient-tests" style="margin-top: 8px; font-size: 0.85rem; color: #4b5563;">`;
+                
+                if (patient.pendingTests && patient.pendingTests.all && patient.pendingTests.all.length > 0) {
+                    html += `<strong style="color: #f59e0b;">⏳ Pending Tests:</strong>`;
+
+                    // Blood tests with status
+                    if (patient.pendingTests.blood && patient.pendingTests.blood.length > 0) {
+                        patient.pendingTests.blood.forEach(test => {
+                            const status = patient.bloodTestStatus?.[test] || 'Not Started';
+                            html += `<div style="margin-top: 3px; color: #f97316; padding-left: 8px;">• ${this.escapeHtml(test)} <span style="color: #6b7280; font-size: 0.75rem;">(${this.escapeHtml(status)})</span></div>`;
+                        });
+                    }
+
+                    // Imaging tests
+                    if (patient.pendingTests.imaging && patient.pendingTests.imaging.length > 0) {
+                        patient.pendingTests.imaging.forEach(test => {
+                            html += `<div style="margin-top: 3px; color: #8b5cf6; padding-left: 8px;">• ${this.escapeHtml(test)}</div>`;
+                        });
+                    }
+                } else {
+                    html += `<strong style="color: #10b981;">📋 After Results Consultation</strong>`;
+                    html += `<div style="margin-top: 3px; color: #6b7280; font-size: 0.85rem;">Waiting for patient to return with results.</div>`;
+                }
+
+                // Show Lab IDs if present
+                if (patient.labRecords && patient.labRecords.length > 0) {
+                    const labIds = [...new Set(patient.labRecords.map(lab => lab.id || lab.labId))].filter(Boolean);
+                    if (labIds.length > 0) {
+                        html += `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e5e7eb;">
+                            <strong style="color: #3b82f6;">🔬 Lab Tracker ID:</strong> 
+                            <span style="background: #eff6ff; color: #1e40af; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-weight: bold;">${labIds.join(', ')}</span>
+                        </div>`;
+                    }
+                }
+
+                html += `</div>`;
+            }
+
+            // Show instruction note if present
+            if (instruction.generalInstruction) {
+                html += `
+                    <div class="event-patient-tests" style="margin-top: 8px; font-style: italic; color: #6b7280; font-size: 0.85rem;">
+                        "${this.escapeHtml(instruction.generalInstruction)}"
+                    </div>
+                `;
+            }
+            
+            // Show next appointment date
+            if (instruction.nextAppointmentDate) {
+                html += `
+                    <div class="event-patient-tests" style="margin-top: 4px; font-size: 0.85rem;">
+                        <strong>Next Visit:</strong> ${this.formatDate(instruction.nextAppointmentDate)}
+                    </div>
+                `;
+            }
+            
+            // Show return duration
+            if (instruction.returnDuration) {
+                const unit = instruction.returnUnit || 'Days';
+                html += `
+                    <div class="event-patient-tests" style="margin-top: 4px; font-size: 0.85rem;">
+                        <strong>Return after:</strong> ${instruction.returnDuration} ${unit.toLowerCase()}
+                    </div>
+                `;
+            }
+            
+            html += `</div>`;
+        });
+        
+        html += '</div>';
+        return html;
     }
 
     /**
@@ -243,7 +291,7 @@ class CalendarEventComponent {
 window.recordInstructionFromCalendar = function(patientDataJson) {
     try {
         const patientData = JSON.parse(patientDataJson);
-        console.log('[Calendar] Recording instruction for:', patientData.displayText);
+        TWOK_LOGGER.debug('[Calendar] Recording instruction for:', patientData.displayText);
         
         // Close the detail dialog
         if (window.calendarEvent) {

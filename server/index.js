@@ -74,7 +74,7 @@ wss.on('connection', (ws) => {
     ws.on('message', async (message) => {
         try {
             const data = JSON.parse(message.toString());
-            console.log(`Received message type: ${data.type} from client ${clientId}`);
+            // console.log(`Received message type: ${data.type} from client ${clientId}`);
             
             // Handle heartbeat
             if (data.type === 'heartbeat') {
@@ -171,7 +171,7 @@ app.post('/api/patients', async (req, res) => {
             .single();
         
         if (error) throw error;
-        broadcast('patient_created', data);
+        // broadcast('patient_created', data); // Relying on Supabase Realtime
         res.json(data);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -188,7 +188,7 @@ app.put('/api/patients/:id', async (req, res) => {
             .single();
         
         if (error) throw error;
-        broadcast('patient_updated', data);
+        // broadcast('patient_updated', data); // Relying on Supabase Realtime
         res.json(data);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -203,7 +203,7 @@ app.delete('/api/patients/:id', async (req, res) => {
             .eq('id', req.params.id);
         
         if (error) throw error;
-        broadcast('patient_deleted', { id: req.params.id });
+        // broadcast('patient_deleted', { id: req.params.id }); // Relying on Supabase Realtime
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -287,7 +287,7 @@ app.post('/api/appointments', async (req, res) => {
             .single();
         
         if (error) throw error;
-        broadcast('appointment_created', data);
+        // broadcast('appointment_created', data); // Relying on Supabase Realtime
         res.json(data);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -304,7 +304,7 @@ app.put('/api/appointments/:id', async (req, res) => {
             .single();
         
         if (error) throw error;
-        broadcast('appointment_updated', data);
+        // broadcast('appointment_updated', data); // Relying on Supabase Realtime
         res.json(data);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -319,7 +319,7 @@ app.delete('/api/appointments/:id', async (req, res) => {
             .eq('id', req.params.id);
         
         if (error) throw error;
-        broadcast('appointment_deleted', { id: req.params.id });
+        // broadcast('appointment_deleted', { id: req.params.id }); // Relying on Supabase Realtime
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -676,103 +676,56 @@ app.delete('/api/hospitals/:id', async (req, res) => {
 // BATCH SYNC ENDPOINT
 // ==========================================
 app.post('/api/sync', async (req, res) => {
-    let currentOp = null;
     try {
-        const { operations } = req.body;
+        const { operations, senderId } = req.body;
         if (!operations || !Array.isArray(operations)) {
             return res.status(400).json({ error: 'Invalid operations format', success: false });
         }
 
-        console.log(`[Sync] 📥 Received ${operations.length} operations`);
         const results = [];
 
-        // Define table priority to handle foreign key constraints
-        const TABLE_PRIORITY = {
-            'patients': 10,
-            'doctors': 10,
-            'expense_categories': 10,
-            'addresses': 10,
-            'specialities': 10,
-            'hospitals': 10,
-            'settings': 10,
-            'appointments': 20,
-            'expenses': 30,
-            'instructions': 30,
-            'lab_records': 40
-        };
+        // Group operations by table and type to allow batching
+        const upsertsByTable = {};
+        const deletesByTable = {};
 
-        // Sort operations: 
-        // 1. Upserts (insert/update) should happen parents-first (ascending priority)
-        // 2. Deletes should happen children-first (descending priority)
-        const sortedOperations = [...operations].sort((a, b) => {
-            const priorityA = TABLE_PRIORITY[a.table] || 99;
-            const priorityB = TABLE_PRIORITY[b.table] || 99;
-            
-            const isDeleteA = a.operation === 'delete';
-            const isDeleteB = b.operation === 'delete';
-
-            if (isDeleteA && !isDeleteB) return 1; // Upserts first
-            if (!isDeleteA && isDeleteB) return -1; // Upserts first
-            
-            if (!isDeleteA && !isDeleteB) {
-                return priorityA - priorityB; // Parents first
-            } else {
-                return priorityB - priorityA; // Children first (for deletes)
-            }
-        });
-
-        // Group same-table, same-operation upserts to minimize requests
-        // (Deletes should probably stay individual or be careful with id lists)
-        for (const op of sortedOperations) {
-            currentOp = op;
+        for (const op of operations) {
             const { table, operation, data, id } = op;
-            console.log(`[Sync] ⏳ Processing ${operation} on ${table} (ID: ${id || 'new'})`);
-            
-            let result;
-            try {
-                switch (operation) {
-                    case 'insert':
-                    case 'update':
-                    case 'upsert':
-                        // Ensure ID is present in data for upsert
-                        const upsertData = { ...data };
-                        if (id && !upsertData.id) upsertData.id = id;
-                        
-                        result = await supabase.from(table).upsert(upsertData).select();
-                        break;
-                    case 'delete':
-                        result = await supabase.from(table).delete().eq('id', id);
-                        break;
-                    default:
-                        throw new Error(`Unknown operation: ${operation}`);
-                }
-
-                if (result.error) {
-                    console.error(`[Sync] ❌ Supabase Error in ${operation} on ${table}:`, result.error);
-                    const customError = new Error(result.error.message || 'Supabase operation failed');
-                    customError.details = result.error.details;
-                    customError.hint = result.error.hint;
-                    customError.code = result.error.code;
-                    throw customError;
-                }
-
-                results.push({ success: true, table, operation, id: id || (result.data && result.data[0] ? result.data[0].id : null) });
-                console.log(`[Sync] ✅ Completed ${operation} on ${table}`);
-            } catch (innerError) {
-                console.error(`[Sync] ❌ Failed during ${operation} on ${table}:`, innerError);
-                throw innerError; // Rethrow to catch in global block
+            if (operation === 'delete') {
+                if (!deletesByTable[table]) deletesByTable[table] = [];
+                deletesByTable[table].push(id);
+            } else {
+                if (!upsertsByTable[table]) upsertsByTable[table] = [];
+                const upsertData = { ...data };
+                if (id && !upsertData.id) upsertData.id = id;
+                upsertsByTable[table].push(upsertData);
             }
         }
 
-        broadcast('sync_completed', { operations: operations.length });
+        // 1. Process Upserts (Batched)
+        for (const [table, records] of Object.entries(upsertsByTable)) {
+            const { data, error } = await supabase.from(table).upsert(records).select();
+            if (error) throw error;
+            results.push({ success: true, table, operation: 'upsert', count: records.length });
+        }
+
+        // 2. Process Deletes (Batched where possible, or individual)
+        for (const [table, ids] of Object.entries(deletesByTable)) {
+            const { error } = await supabase.from(table).delete().in('id', ids);
+            if (error) throw error;
+            results.push({ success: true, table, operation: 'delete', count: ids.length });
+        }
+
+        // Broadcast the specific operations to other clients via WebSocket for instant syncing
+        broadcast('sync_operations', { operations, senderId });
+        
+        // Also broadcast sync completed event
+        broadcast('sync_completed', { operations: operations.length, senderId });
+        
         res.json({ success: true, results });
     } catch (error) {
         console.error('[Sync] Global error:', error);
         res.status(500).json({ 
             error: error.message, 
-            details: error.details || (currentOp ? `Failed at ${currentOp.operation} on ${currentOp.table}` : 'Unknown'),
-            hint: error.hint || 'Check server logs for detailed stack trace',
-            code: error.code,
             success: false 
         });
     }
@@ -795,7 +748,7 @@ async function setupRealtimeSubscriptions() {
                 'postgres_changes',
                 { event: '*', schema: 'public', table },
                 (payload) => {
-                    console.log(`📡 ${table} change:`, payload.eventType);
+                    // console.log(`📡 ${table} change:`, payload.eventType);
                     broadcast(`${table}_${payload.eventType.toLowerCase()}`, payload.new);
                 }
             )
@@ -808,8 +761,8 @@ async function setupRealtimeSubscriptions() {
 // ==========================================
 async function start() {
     try {
-        // Setup realtime subscriptions
-        await setupRealtimeSubscriptions();
+        // Setup realtime subscriptions - DISABLED: Clients listen to Supabase Realtime directly
+        // await setupRealtimeSubscriptions();
 
         server.listen(PORT, () => {
             console.log('✅ TWOK Clinic Backend running');

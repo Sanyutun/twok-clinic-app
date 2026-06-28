@@ -19,20 +19,20 @@ class TWOKClinicApp {
      */
     async init() {
         if (this.initialized) {
-            console.log('[TWOKClinicApp] Already initialized');
+            TWOK_LOGGER.info('[TWOKClinicApp] Already initialized');
             return;
         }
 
-        console.log('[TWOKClinicApp] Initializing...');
+        TWOK_LOGGER.info('[TWOKClinicApp] Initializing...');
 
         try {
             // Initialize IndexedDB
             await indexedDBStorage.open();
-            console.log('[TWOKClinicApp] ✓ IndexedDB initialized');
+            TWOK_LOGGER.info('[TWOKClinicApp] ✓ IndexedDB initialized');
 
             // Initialize WebSocket
             websocketClient.connect();
-            console.log('[TWOKClinicApp] ✓ WebSocket connecting...');
+            TWOK_LOGGER.info('[TWOKClinicApp] ✓ WebSocket connecting...');
 
             // Set up WebSocket listeners
             websocketClient.on('queue_update', (data) => {
@@ -51,7 +51,7 @@ class TWOKClinicApp {
             await this.registerServiceWorker();
 
             this.initialized = true;
-            console.log('[TWOKClinicApp] ✓ Initialization complete');
+            TWOK_LOGGER.info('[TWOKClinicApp] ✓ Initialization complete');
 
             this.notifyListeners('initialized', {});
 
@@ -70,12 +70,12 @@ class TWOKClinicApp {
                 const registration = await navigator.serviceWorker.register('/sw.js', {
                     scope: '/'
                 });
-                console.log('[TWOKClinicApp] ✓ Service Worker registered:', registration.scope);
+                TWOK_LOGGER.info('[TWOKClinicApp] ✓ Service Worker registered:', registration.scope);
 
                 // Listen for service worker messages
                 navigator.serviceWorker.addEventListener('message', (event) => {
                     const { type, payload } = event.data || {};
-                    console.log('[TWOKClinicApp] Service Worker message:', type);
+                    TWOK_LOGGER.info('[TWOKClinicApp] Service Worker message:', type);
                     this.notifyListeners('sw-message', { type, payload });
                 });
 

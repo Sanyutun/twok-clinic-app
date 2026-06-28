@@ -209,6 +209,11 @@ class CalendarGridComponent {
                     const moreEl = document.createElement('div');
                     moreEl.className = 'more-events';
                     moreEl.textContent = `+${remainingCount} more`;
+                    moreEl.style.cursor = 'pointer';
+                    moreEl.addEventListener('click', (e) => {
+                        e.stopPropagation(); // Prevent cell click if any
+                        window.calendarEvent.showDayDetail(dateStr);
+                    });
                     eventsContainer.appendChild(moreEl);
                 }
             }

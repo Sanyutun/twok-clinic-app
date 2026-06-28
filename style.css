@@ -16,7 +16,7 @@
     --background-color: #ffffff;
     --border-color: #e5e7eb;
     --text-primary: #111827;
-    --text-secondary: #6b7280;
+    --text-secondary: #374151;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
     --radius: 8px;
@@ -1495,6 +1495,26 @@ tbody tr.highlighted {
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.3px;
+}
+
+/* Long Wait Warnings */
+.long-wait-row {
+    background-color: #fff1f2 !important; /* Very light red */
+}
+
+.long-wait-warning {
+    font-size: 0.7rem;
+    color: #e11d48; /* Crimson */
+    font-weight: 700;
+    margin-top: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #ffe4e6;
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid #fecdd3;
+    white-space: nowrap;
 }
 
 .status-noted {

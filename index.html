@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="https://unpkg.com/primeicons/primeicons.css">
     <title>TWOK Clinic - Registration System</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="views/todo-view.css">
 </head>
 <body>
     <div class="container">
@@ -164,6 +165,7 @@
                                 <th data-sort="speciality">Speciality <span class="sort-icon">↕</span></th>
                                 <th data-sort="hospital">Hospital <span class="sort-icon">↕</span></th>
                                 <th data-sort="phone">Phone <span class="sort-icon">↕</span></th>
+                                <th>Instruction</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -275,6 +277,20 @@
                                 </div>
                             </div>
 
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                        <input
+                                            type="checkbox"
+                                            id="doctorNeedInstruction"
+                                            style="width: 18px; height: 18px; cursor: pointer;"
+                                            checked
+                                        >
+                                        <span>Need Instruction (Shown in Pharmacist Corner)</span>
+                                    </label>
+                                </div>
+                            </div>
+
                             <div class="form-actions">
                                 <button type="submit" id="doctorSaveBtn" class="btn btn-primary">
                                     <span id="doctorSaveBtnText">Save Doctor</span>
@@ -371,15 +387,18 @@
 
                         <div class="form-group">
                             <label for="patientName">Patient Name <span class="required">*</span></label>
-                            <input
-                                type="text"
-                                id="patientName"
-                                class="form-control"
-                                required
-                                placeholder="Enter patient name"
-                                tabindex="1"
-                                inputmode="text"
-                            >
+                            <div class="autocomplete-wrapper">
+                                <input
+                                    type="text"
+                                    id="patientName"
+                                    class="form-control"
+                                    required
+                                    placeholder="Enter patient name"
+                                    tabindex="1"
+                                    inputmode="text"
+                                >
+                                <div id="patientRegisterAutocomplete" class="autocomplete-dropdown hidden"></div>
+                            </div>
                         </div>
                     </div>
 
@@ -547,6 +566,10 @@
                 <span class="sidebar-icon">💊</span>
                 <span class="sidebar-label">Pharmacist</span>
             </button>
+            <button type="button" class="sidebar-item" data-section="todo">
+                <span class="sidebar-icon">📋</span>
+                <span class="sidebar-label">TODO</span>
+            </button>
             <button type="button" class="sidebar-item" data-section="settings">
                 <span class="sidebar-icon">⚙️</span>
                 <span class="sidebar-label">Settings</span>
@@ -592,6 +615,10 @@
         <button type="button" class="nav-item" data-section="pharmacist">
             <span class="nav-icon">💊</span>
             <span class="nav-label">Pharmacist</span>
+        </button>
+        <button type="button" class="nav-item" data-section="todo">
+            <span class="nav-icon">📋</span>
+            <span class="nav-label">TODO</span>
         </button>
         <button type="button" class="nav-item" data-section="settings">
             <span class="nav-icon">⚙️</span>
@@ -668,6 +695,9 @@
             <div class="table-header">
                 <h2>Appointments</h2>
                 <div class="table-header-actions">
+                    <button type="button" id="undoAppointmentBtn" class="btn btn-warning btn-sm" title="Undo Last Action (Ctrl+Z)" style="display: none; margin-right: 10px;">
+                        ↩️ Undo
+                    </button>
                     <span id="appointmentCount" class="record-count">0 appointments</span>
                     <button type="button" id="todayAppointmentsBtn" class="btn btn-secondary btn-sm" title="Show Today's Appointments">
                         📅 Today
@@ -808,6 +838,7 @@
                                 <select id="appointmentBookingType" class="form-control" required tabindex="4">
                                     <option value="">Select Type</option>
                                     <option value="Emergency">🚨 Emergency</option>
+                                    <option value="Echo Urgent">💓 Echo Urgent</option>
                                     <option value="VIP">⭐ VIP</option>
                                     <option value="Regular">📋 Regular</option>
                                     <option value="FOC">💝 FOC</option>
@@ -1353,6 +1384,7 @@
                                 <select id="calendarApptBookingType" class="form-control" required tabindex="4">
                                     <option value="">Select Type</option>
                                     <option value="Emergency">🚨 Emergency</option>
+                                    <option value="Echo Urgent">💓 Echo Urgent</option>
                                     <option value="VIP">⭐ VIP</option>
                                     <option value="Regular">📋 Regular</option>
                                     <option value="FOC">💝 FOC</option>
@@ -1592,7 +1624,7 @@
                 </div>
             </div>
 
-            <div class="table-wrapper">
+            <div>
                 <div id="expenseTableContainer">
                     <!-- Expense records grouped by date will be inserted here -->
                 </div>
@@ -1762,6 +1794,131 @@
         </div>
     </section>
 
+    <!-- TODO Section -->
+    <section id="todoSection" class="module-section hidden">
+        <div class="header">
+            <h2>📋 Staff TODO List</h2>
+            <p class="subtitle">Daily reminders and pending tasks</p>
+        </div>
+
+        <div class="todo-grid">
+            <!-- Category 1: Appointments Needing Instructions -->
+            <div class="todo-card">
+                <div class="todo-card-header">
+                    <h3>📝 Needing Instructions</h3>
+                    <span id="todoCountAppts" class="todo-badge">0</span>
+                </div>
+                <div class="todo-card-body">
+                    <div class="table-wrapper">
+                        <table id="todoTableAppts">
+                            <thead>
+                                <tr>
+                                    <th>Patient</th>
+                                    <th>Doctor</th>
+                                    <th>Date</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="todoBodyAppts"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category 2: Pending Lab Records -->
+            <div class="todo-card">
+                <div class="todo-card-header">
+                    <h3>🔬 Labs: Pending Results</h3>
+                    <span id="todoCountLabsPending" class="todo-badge">0</span>
+                </div>
+                <div class="todo-card-body">
+                    <div class="table-wrapper">
+                        <table id="todoTableLabsPending">
+                            <thead>
+                                <tr>
+                                    <th>Patient</th>
+                                    <th>Lab Name</th>
+                                    <th>Sent Date</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="todoBodyLabsPending"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category 3: Results to Inform -->
+            <div class="todo-card urgent">
+                <div class="todo-card-header">
+                    <h3>📞 Results: To Inform</h3>
+                    <span id="todoCountLabsToInform" class="todo-badge">0</span>
+                </div>
+                <div class="todo-card-body">
+                    <div class="table-wrapper">
+                        <table id="todoTableLabsToInform">
+                            <thead>
+                                <tr>
+                                    <th>Patient</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="todoBodyLabsToInform"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category 4: Results Informed (Pending Receipt) -->
+            <div class="todo-card">
+                <div class="todo-card-header">
+                    <h3>📦 Results: Pending Receipt</h3>
+                    <span id="todoCountLabsPendingReceipt" class="todo-badge">0</span>
+                </div>
+                <div class="todo-card-body">
+                    <div class="table-wrapper">
+                        <table id="todoTableLabsPendingReceipt">
+                            <thead>
+                                <tr>
+                                    <th>Patient</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="todoBodyLabsPendingReceipt"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category 5: Missing Lab Trackers -->
+            <div class="todo-card warning">
+                <div class="todo-card-header">
+                    <h3>⚠️ Missing Lab Trackers</h3>
+                    <span id="todoCountMissingLabs" class="todo-badge">0</span>
+                </div>
+                <div class="todo-card-body">
+                    <p class="todo-hint">Instructions set to "After Results" but no lab record exists.</p>
+                    <div class="table-wrapper">
+                        <table id="todoTableMissingLabs">
+                            <thead>
+                                <tr>
+                                    <th>Patient</th>
+                                    <th>Doctor</th>
+                                    <th>Instruction Date</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="todoBodyMissingLabs"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            </div>
+        </section>
+
     <!-- Settings Section -->
     <section id="settingsSection" class="module-section hidden">
         <!-- Header -->
@@ -1846,6 +2003,31 @@
                 </div>
                 <div style="margin-top: 20px; text-align: right;">
                     <button type="button" id="saveDefaultTimesBtn" class="btn btn-primary">💾 Save Default Times</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 4: Queue Management Settings -->
+        <section class="settings-card">
+            <div class="settings-card-header">
+                <h3>🚦 Queue Management Settings</h3>
+                <p class="settings-card-description">Configure the number of turns for penalties and Echo Urgent patients.</p>
+            </div>
+            <div class="settings-card-body">
+                <div class="form-row" style="display: flex; gap: 20px;">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="penaltyTurnsSetting">Penalty Turns (Late Arrival)</label>
+                        <input type="number" id="penaltyTurnsSettingInput" class="form-control" min="1" max="10" value="3">
+                        <small class="form-text text-muted">Turns a late patient must wait.</small>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="waitingTurnsSetting">Echo Urgent Waiting Turns</label>
+                        <input type="number" id="waitingTurnsSettingInput" class="form-control" min="1" max="10" value="3">
+                        <small class="form-text text-muted">Turns an Echo Urgent patient must wait after arrival.</small>
+                    </div>
+                </div>
+                <div style="margin-top: 20px; text-align: right;">
+                    <button type="button" id="saveQueueSettingsBtn" class="btn btn-primary">💾 Save Queue Settings</button>
                 </div>
             </div>
         </section>
@@ -2078,6 +2260,7 @@
     <script src="indexeddb.js"></script>
     <script src="components/instruction-form.js"></script>
     <script src="script.js"></script>
+    <script src="views/todo-view.js"></script>
     <script src="components/expense-form.js"></script>
     <script>
         // Register Service Worker for PWA
