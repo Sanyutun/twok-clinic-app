@@ -898,7 +898,14 @@ function selectPatientForRegistration(patientId) {
     
     // Ask for confirmation to load existing patient
     if (confirm(`Patient "${patient.name}" already exists. Do you want to load their information for editing?`)) {
-        loadPatientToForm(patientId);
+        // If from appointment form, close patient form and populate appointment directly
+        if (window.patientFormSourceSection === 'appointment') {
+            closePatientFormModal();
+            selectPatient(patientId);
+            window.patientFormSourceSection = null;
+        } else {
+            loadPatientToForm(patientId);
+        }
     }
 }
 
@@ -2103,24 +2110,23 @@ function savePatient(e) {
         patients.push(data);
         savePatientsToStorage();
         showNotification('Patient registered successfully!');
-        
-        // If registering from appointment form, auto-fill and return to appointment
-        if (window.patientFormSourceSection === 'appointment') {
-            closePatientFormModal();
-            // Auto-fill patient field in appointment form
-            elements.appointmentPatient.value = data.name;
-            elements.appointmentPatientId.value = data.id;
-            // Fill patient info display
-            elements.displayPatientAge.value = data.age || '';
-            elements.displayPatientSex.value = data.sex || '';
-            elements.displayPatientPhone.value = data.phone || '';
-            elements.displayPatientFoc.value = data.isFoc ? 'FOC' : 'Regular';
-            elements.patientInfoDisplay.style.display = 'grid';
-            // Focus on doctor field
-            setTimeout(() => elements.appointmentDoctor.focus(), 200);
-            return;
-        }
-        // If from patient tab, just refresh the patient table
+    }
+
+    // If from appointment form, auto-fill and return to appointment
+    if (window.patientFormSourceSection === 'appointment') {
+        closePatientFormModal();
+        // Auto-fill patient field in appointment form
+        elements.appointmentPatient.value = data.name;
+        elements.appointmentPatientId.value = data.id;
+        // Fill patient info display
+        elements.displayPatientAge.value = data.age || '';
+        elements.displayPatientSex.value = data.sex || '';
+        elements.displayPatientPhone.value = data.phone || '';
+        elements.displayPatientFoc.value = data.isFoc ? 'FOC' : 'Regular';
+        elements.patientInfoDisplay.style.display = 'grid';
+        // Focus on doctor field
+        setTimeout(() => elements.appointmentDoctor.focus(), 200);
+        return;
     }
     closePatientFormModal();
     renderPatientTable();

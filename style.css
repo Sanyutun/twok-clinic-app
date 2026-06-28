@@ -849,8 +849,6 @@ tbody tr.highlighted {
 }
 
 .bottom-sheet-body .form-actions {
-    position: sticky;
-    bottom: 0;
     background-color: var(--background-color);
     padding-top: 15px;
     border-top: 1px solid var(--border-color);
@@ -2136,6 +2134,10 @@ tbody tr.current-patient td {
         padding: 10px 20px 10px 20px;
     }
 
+    .form-row {
+        flex-direction: column;
+    }
+
     /* Reduce extra padding on smaller screens */
     #appointmentSection .container,
     #instructionSection .container,
@@ -2223,6 +2225,14 @@ tbody tr.current-patient td {
 
     .modal-body {
         padding: 15px;
+    }
+
+    .test-checkboxes {
+        grid-template-columns: 1fr !important;
+    }
+
+    .patient-info-display {
+        flex-direction: column;
     }
 
     .autocomplete-wrapper {
@@ -2383,18 +2393,14 @@ tbody tr.current-patient td {
 
 .slide-panel-body {
     padding: 25px;
-    padding-bottom: 100px;
     overflow-y: auto;
     flex: 1;
 }
 
 /* Make form actions visible at bottom */
 .form-actions {
-    position: sticky;
-    bottom: 0;
     background-color: var(--background-color);
     padding: 15px 0;
-    z-index: 10;
     border-top: 1px solid var(--border-color);
     margin-top: 25px;
 }
