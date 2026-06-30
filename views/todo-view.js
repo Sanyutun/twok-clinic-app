@@ -42,8 +42,7 @@ class TodoView {
         const countBadge = document.getElementById('todoCountAppts');
         
         const filtered = appts.filter(a => {
-            const isDoneOrPostpone = a.status === 'Done' || a.status === 'Postpone';
-            if (!isDoneOrPostpone) return false;
+            if (a.status === 'Cancelled') return false;
             
             // Exclude patients whose appointment doctor has needInstruction set to false
             const doctor = (window.doctors || []).find(d => d.id === a.doctorId);

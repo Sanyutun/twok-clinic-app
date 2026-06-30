@@ -3744,6 +3744,21 @@ tbody tr.current-patient td {
     border-bottom: 1px solid var(--border-color);
 }
 
+.status-badge-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.pharmacist-appt-status {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+
 .pharmacist-card-title {
     font-size: 1.1rem;
     font-weight: 700;

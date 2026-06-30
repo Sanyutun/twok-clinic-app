@@ -239,7 +239,7 @@ class PharmacistCornerApp {
         // Filter appointments with status "Done" from today
         let filtered = this.appointments.filter(appt => {
             const apptDate = appt.appointmentTime ? appt.appointmentTime.split('T')[0] : '';
-            const isDoneToday = appt.status === 'Done' && apptDate === this.today;
+            const isDoneToday = appt.status !== 'Cancelled' && apptDate === this.today;
             if (!isDoneToday) return false;
 
             // Find doctor to check needInstruction flag
@@ -362,9 +362,12 @@ class PharmacistCornerApp {
             <div class="patient-card ${isCompleted ? 'completed' : ''}" data-appointment-id="${appt.id || appt.appointment_id}">
                 <div class="patient-card-header">
                     <span class="patient-card-booking">#${bookingNum}</span>
-                    <span class="patient-card-status ${isCompleted ? 'completed' : 'pending'}">
-                        ${isCompleted ? '✓ Completed' : '⏳ Pending'}
-                    </span>
+                    <div class="status-badge-wrapper">
+                        <span class="patient-card-status ${isCompleted ? 'completed' : 'pending'}">
+                            ${isCompleted ? '✓ Completed' : '⏳ Pending'}
+                        </span>
+                        <div class="pharmacist-appt-status">${appt.status || ''}</div>
+                    </div>
                 </div>
                 <div class="patient-card-body">
                     <h3 class="patient-card-name">${patientName}</h3>

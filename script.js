@@ -1717,7 +1717,7 @@ function renderInstructionDoctorFilter() {
     // Collect unique doctor names from appointments with Done/Postpone status
     const instructionDoctors = new Set();
     appointments.forEach(appt => {
-        if ((appt.status === 'Done' || appt.status === 'Postpone') && appt.doctorName) {
+        if (appt.status !== 'Cancelled' && appt.doctorName) {
             const doctor = doctors.find(d => d.name === appt.doctorName);
             if (doctor ? (doctor.needInstruction !== false) : true) {
                 instructionDoctors.add(appt.doctorName);
@@ -4094,8 +4094,7 @@ function renderInstructionTableWithSaved() {
 
     // Get ALL appointments with status "Done" or "Postpone"
     let allAppointments = appointments.filter(appt => {
-        const isDoneOrPostpone = appt.status === 'Done' || appt.status === 'Postpone';
-        if (!isDoneOrPostpone) return false;
+        if (appt.status === 'Cancelled') return false;
         
         // Find doctor to check needInstruction flag
         const doctor = doctors.find(d => d.name === appt.doctorName);
@@ -8015,7 +8014,7 @@ function renderPharmacistCorner() {
     // Get today's completed appointments (status = 'Done')
     const todayAppointments = appointments.filter(appt => {
         const apptDate = appt.appointmentTime ? appt.appointmentTime.split('T')[0] : '';
-        const isDoneToday = apptDate === today && appt.status === 'Done';
+        const isDoneToday = apptDate === today && appt.status !== 'Cancelled';
         if (!isDoneToday) return false;
         
         // Find doctor to check needInstruction flag
@@ -8130,7 +8129,10 @@ function renderPharmacistCorner() {
                         <div class="pharmacist-card-title">${escapeHtml(patientName)}</div>
                         <div class="pharmacist-card-booking">Booking #${escapeHtml(bookingNumber)}</div>
                     </div>
-                    <span class="status-badge ${statusBadgeClass}">${statusLabel}</span>
+                    <div class="status-badge-wrapper">
+                        <span class="status-badge ${statusBadgeClass}">${statusLabel}</span>
+                        <div class="pharmacist-appt-status">${escapeHtml(appt.status || '')}</div>
+                    </div>
                 </div>
                 <div class="pharmacist-card-body">
                     <div class="pharmacist-info-row">
