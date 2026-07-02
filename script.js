@@ -2839,7 +2839,7 @@ function renderAppointmentTable(filteredAppointments = null) {
     elements.appointmentEmptyTableMessage.classList.add('hidden');
     elements.appointmentTable.classList.remove('hidden');
 
-    // Sort by: 1) Status 'In Consult', 2) isNext (Locked next patient), 3) Status priority, 4) Penalty, 5) Booking number
+    // Sort by: 1) Status 'In Consult', 2) isNext (Locked next patient), 3) Status priority, 4) Waiting turns, 5) Penalty, 6) Booking number
     const sortedData = [...data].sort((a, b) => {
         // Priority 1: Current consultation first
         if (a.status === 'In Consult' && b.status !== 'In Consult') return -1;
@@ -2857,14 +2857,21 @@ function renderAppointmentTable(filteredAppointments = null) {
             return aPriority - bPriority;
         }
 
-        // Priority 4: Penalty (patients without penalty first)
+        // Priority 4: Waiting turns (Echo Urgent patients with turns wait)
+        const aWaiting = a.bookingType === 'Echo Urgent' ? (a.waitingTurns || 0) : 0;
+        const bWaiting = b.bookingType === 'Echo Urgent' ? (b.waitingTurns || 0) : 0;
+
+        if (aWaiting > 0 && bWaiting === 0) return 1;
+        if (aWaiting === 0 && bWaiting > 0) return -1;
+
+        // Priority 5: Penalty (patients without penalty first)
         const aHasPenalty = a.penaltyTurns && a.penaltyTurns > 0;
         const bHasPenalty = b.penaltyTurns && b.penaltyTurns > 0;
 
         if (aHasPenalty && !bHasPenalty) return 1;
         if (!aHasPenalty && bHasPenalty) return -1;
 
-        // Priority 5: Booking number ascending
+        // Priority 6: Booking number ascending
         if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
         if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
         return parseInt(a.bookingNumber, 10) - parseInt(b.bookingNumber, 10);
@@ -3442,10 +3449,7 @@ async function handleInvestigationYes() {
     appointments[index].status = 'Investigation';
     appointments[index].investigationOrderedTime = toLocalISOString(new Date());
     
-    // Reduce penalty turns for other waiting patients
-    const penaltyResult = await reducePenaltyTurns();
-    
-    await saveAppointmentsToStorage([currentConsultingAppointment, ...penaltyResult.updatedIds]);
+    await saveAppointmentsToStorage([currentConsultingAppointment]);
 
     // Track this patient as "just investigated" so they're excluded from next candidate list
     lastInvestigatedPatientId = currentConsultingAppointment;
@@ -3543,10 +3547,7 @@ async function handleInvestigationNo() {
     appt.status = 'Done';
     appt.completedTime = toLocalISOString(new Date());
 
-    // Reduce penalty turns for all waiting patients
-    const penaltyResult = await reducePenaltyTurns();
-
-    await saveAppointmentsToStorage([currentConsultingAppointment, ...penaltyResult.updatedIds]);
+    await saveAppointmentsToStorage([currentConsultingAppointment]);
 
     // Check if there is already a designated next patient (to get the list)
     const today = toLocalDateString(new Date());
@@ -3566,15 +3567,7 @@ async function handleInvestigationNo() {
     renderAppointmentTable();
     updateQueueSummary();
 
-    // Show notification with penalty reduction info
-    if (penaltyResult.reduced) {
-        const patientList = penaltyResult.patients
-            .map(p => `#${p.bookingNumber} ${p.name} (${p.oldPenalty}→${p.newPenalty})`)
-            .join(', ');
-        showNotification(`Consultation completed. Penalty reduced: ${patientList}`, 'success');
-    } else {
-        showNotification('Consultation completed - select next patient');
-    }
+    showNotification('Consultation completed - select next patient');
 
     // Broadcast to TV display
     sendQueueEvent('consultation_finished', {
@@ -3606,9 +3599,9 @@ function sortAppointmentsForQueue(appts) {
             if (appt.bookingType === 'Emergency') return 1;
             if (appt.status === 'Investigation') return 2;
             
-            // Echo Urgent logic: only prioritize if waiting turns are 0
+            // Echo Urgent logic: behaves like penalty turns — wait for turns to expire
             if (appt.bookingType === 'Echo Urgent') {
-                return (appt.waitingTurns || 0) === 0 ? 3 : 6; // 3 if ready, 6 (below normal) if still waiting
+                return (appt.waitingTurns || 0) > 0 ? 6 : 4; // 6 if still waiting, 4 (same as normal) when ready
             }
             
             // Normal patients

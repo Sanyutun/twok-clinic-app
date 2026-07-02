@@ -429,7 +429,17 @@ class DataLayer {
             const arrayName = this.tableToArrayName(storeName);
             if (window[arrayName] && Array.isArray(window[arrayName])) {
                 const flattenedRecords = sanitizedRecords.map(r => this.flattenRecordIfNeeded(storeName, r));
-                window[arrayName].splice(0, window[arrayName].length, ...flattenedRecords);
+                for (const record of flattenedRecords) {
+                    const existingIndex = window[arrayName].findIndex(item => {
+                        const itemId = item.id || item.AppointmentID || item.PatientID || item.DoctorID || item.InstructionID || item.ExpenseID || item.LabID || item.labId;
+                        return itemId === record.id;
+                    });
+                    if (existingIndex >= 0) {
+                        window[arrayName][existingIndex] = record;
+                    } else {
+                        window[arrayName].push(record);
+                    }
+                }
             }
 
             // 2. Queue for cloud sync using bulkQueue

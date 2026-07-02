@@ -60,7 +60,13 @@ class TodoView {
             return;
         }
 
-        tbody.innerHTML = filtered.map(a => `
+        const sorted = [...filtered].sort((a, b) => {
+            const aTime = a.appointmentTime ? new Date(a.appointmentTime).getTime() : 0;
+            const bTime = b.appointmentTime ? new Date(b.appointmentTime).getTime() : 0;
+            return bTime - aTime;
+        });
+
+        tbody.innerHTML = sorted.map(a => `
             <tr>
                 <td><strong>${this.escapeHtml(a.patientName)}</strong></td>
                 <td>${this.escapeHtml(a.doctorName)}</td>
@@ -90,7 +96,13 @@ class TodoView {
             return;
         }
 
-        tbody.innerHTML = filtered.map(l => `
+        const sorted = [...filtered].sort((a, b) => {
+            const aTime = a.dateTime ? new Date(a.dateTime).getTime() : 0;
+            const bTime = b.dateTime ? new Date(b.dateTime).getTime() : 0;
+            return bTime - aTime;
+        });
+
+        tbody.innerHTML = sorted.map(l => `
             <tr>
                 <td><strong>${this.escapeHtml(l.patientName)}</strong></td>
                 <td>${this.escapeHtml(l.labName)}</td>
@@ -120,7 +132,13 @@ class TodoView {
             return;
         }
 
-        tbody.innerHTML = filtered.map(l => `
+        const sorted = [...filtered].sort((a, b) => {
+            const aTime = a.dateTime ? new Date(a.dateTime).getTime() : 0;
+            const bTime = b.dateTime ? new Date(b.dateTime).getTime() : 0;
+            return bTime - aTime;
+        });
+
+        tbody.innerHTML = sorted.map(l => `
             <tr>
                 <td><strong>${this.escapeHtml(l.patientName)}</strong></td>
                 <td><span class="todo-status-tag urgent">${l.status}</span></td>
@@ -149,7 +167,13 @@ class TodoView {
             return;
         }
 
-        tbody.innerHTML = filtered.map(l => `
+        const sorted = [...filtered].sort((a, b) => {
+            const aTime = a.dateTime ? new Date(a.dateTime).getTime() : 0;
+            const bTime = b.dateTime ? new Date(b.dateTime).getTime() : 0;
+            return bTime - aTime;
+        });
+
+        tbody.innerHTML = sorted.map(l => `
             <tr>
                 <td><strong>${this.escapeHtml(l.patientName)}</strong></td>
                 <td><span class="todo-status-tag inform">${l.status}</span></td>
@@ -199,7 +223,13 @@ class TodoView {
             return;
         }
 
-        tbody.innerHTML = missing.map(i => `
+        const sorted = [...missing].sort((a, b) => {
+            const aTime = a.appointmentDate ? new Date(a.appointmentDate).getTime() : 0;
+            const bTime = b.appointmentDate ? new Date(b.appointmentDate).getTime() : 0;
+            return bTime - aTime;
+        });
+
+        tbody.innerHTML = sorted.map(i => `
             <tr>
                 <td><strong>${this.escapeHtml(i.patientName)}</strong></td>
                 <td>${this.escapeHtml(i.followUpDoctor || i.doctorName)}</td>

@@ -329,6 +329,14 @@
             updateUIConnectionStatus(manager.isOnline);
         }
 
+        // Auto-sync on app open (silent background pull)
+        if (manager && manager.isOnline && typeof manager.pullAll === 'function') {
+            TWOK_LOGGER.sync('[Sync Integration] Auto-syncing on app open...');
+            manager.pullAll(true).catch(err => {
+                TWOK_LOGGER.warn('[Sync Integration] Auto-sync background pull failed:', err);
+            });
+        }
+
         TWOK_LOGGER.sync('[Sync Integration] ✅ Integration complete!');
         TWOK_LOGGER.sync('[Sync Integration] Use window.getSyncStatus() to check sync status');
         TWOK_LOGGER.sync('[Sync Integration] Use window.triggerSync() to manually sync');
