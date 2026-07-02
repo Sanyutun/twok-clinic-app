@@ -1230,9 +1230,19 @@ class DataLayer {
         TWOK_LOGGER.sync('[DataLayer] Starting manual sync...');
 
         if (!window.SupabaseClient || !window.SupabaseClient.initialized || !window.SupabaseClient.client) {
-            console.error('[DataLayer] Cannot sync: Supabase client is not initialized');
-            if (!silent) throw new Error('Supabase sync is currently unavailable. Please check your internet connection and reload the app.');
-            return;
+            console.warn('[DataLayer] Supabase client not initialized. Attempting re-initialization...');
+            try {
+                const config = window.TWOK_CONFIG;
+                if (config && window.SupabaseClient && typeof window.SupabaseClient.init === 'function') {
+                    await window.SupabaseClient.init(config.SUPABASE.URL, config.SUPABASE.ANON_KEY);
+                }
+            } catch (retryError) {
+                console.error('[DataLayer] Supabase re-initialization failed:', retryError);
+            }
+            if (!window.SupabaseClient || !window.SupabaseClient.initialized || !window.SupabaseClient.client) {
+                if (!silent) throw new Error('Supabase sync is currently unavailable. Please check your internet connection and reload the app.');
+                return;
+            }
         }
 
         try {

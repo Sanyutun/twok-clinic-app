@@ -36,8 +36,9 @@ class SupabaseClient {
                     throw new Error('Supabase URL or Key is missing');
                 }
 
-                // Dynamically import Supabase JS client - Use a specific version for stability
-                const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/+esm');
+                // Dynamically import Supabase JS client - try multiple CDN sources
+                // to handle mobile browsers where certain CDNs may be blocked
+                const { createClient } = await this._importSupabase();
                 
                 this.client = createClient(url, key, {
                     auth: {
@@ -62,6 +63,80 @@ class SupabaseClient {
         })();
 
         return this.initPromise;
+    }
+
+    /**
+     * Try to import @supabase/supabase-js from multiple CDN sources
+     * Falls back through multiple providers for mobile compatibility
+     */
+    async _importSupabase() {
+        const cdnSources = [
+            {
+                name: 'jsdelivr (+esm)',
+                url: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/+esm'
+            },
+            {
+                name: 'jsdelivr (esm)',
+                url: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/esm/wrapper.mjs'
+            },
+            {
+                name: 'unpkg (+esm)',
+                url: 'https://unpkg.com/@supabase/supabase-js@2.39.7/+esm'
+            },
+            {
+                name: 'unpkg (esm)',
+                url: 'https://unpkg.com/@supabase/supabase-js@2.39.7/dist/esm/wrapper.mjs'
+            }
+        ];
+
+        let lastError;
+
+        for (const source of cdnSources) {
+            try {
+                TWOK_LOGGER.realtime(`[SupabaseClient] Trying CDN: ${source.name} (${source.url})`);
+                const mod = await import(source.url);
+                TWOK_LOGGER.realtime(`[SupabaseClient] ✅ Loaded from CDN: ${source.name}`);
+                return mod;
+            } catch (e) {
+                lastError = e;
+                console.warn(`[SupabaseClient] CDN source "${source.name}" failed:`, e.message);
+            }
+        }
+
+        // Last resort: try injecting a script tag for the UMD build
+        try {
+            TWOK_LOGGER.realtime('[SupabaseClient] Trying UMD script tag fallback...');
+            const { createClient } = await this._loadSupabaseScript();
+            return { createClient };
+        } catch (e) {
+            lastError = e;
+            console.warn('[SupabaseClient] UMD script tag fallback also failed:', e.message);
+        }
+
+        throw lastError || new Error('Failed to load Supabase client from any CDN source. Please check your internet connection.');
+    }
+
+    /**
+     * Load Supabase via dynamic script tag injection (UMD build)
+     * Used as last resort when dynamic imports fail on some mobile browsers
+     */
+    _loadSupabaseScript() {
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.js';
+            script.crossOrigin = 'anonymous';
+            script.onload = () => {
+                if (window.supabase && typeof window.supabase.createClient === 'function') {
+                    resolve(window.supabase);
+                } else {
+                    reject(new Error('UMD script loaded but createClient not found'));
+                }
+            };
+            script.onerror = () => {
+                reject(new Error('Failed to load UMD script'));
+            };
+            document.head.appendChild(script);
+        });
     }
 
     /**
