@@ -85,16 +85,20 @@ class SupabaseClient {
                 url: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/+esm'
             },
             {
-                name: 'jsdelivr (esm)',
-                url: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/esm/wrapper.mjs'
+                name: 'jsdelivr (module)',
+                url: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/module/index.js'
             },
             {
                 name: 'unpkg (+esm)',
                 url: 'https://unpkg.com/@supabase/supabase-js@2.39.7/+esm'
             },
             {
-                name: 'unpkg (esm)',
-                url: 'https://unpkg.com/@supabase/supabase-js@2.39.7/dist/esm/wrapper.mjs'
+                name: 'unpkg (module)',
+                url: 'https://unpkg.com/@supabase/supabase-js@2.39.7/dist/module/index.js'
+            },
+            {
+                name: 'esm.sh',
+                url: 'https://esm.sh/@supabase/supabase-js@2.39.7'
             }
         ];
 
@@ -130,22 +134,36 @@ class SupabaseClient {
      * Used as last resort when dynamic imports fail on some mobile browsers
      */
     _loadSupabaseScript() {
-        return new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.js';
-            script.crossOrigin = 'anonymous';
-            script.onload = () => {
-                if (window.supabase && typeof window.supabase.createClient === 'function') {
-                    resolve(window.supabase);
-                } else {
-                    reject(new Error('UMD script loaded but createClient not found'));
+        const umdSources = [
+            'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.js',
+            'https://unpkg.com/@supabase/supabase-js@2.39.7/dist/umd/supabase.js'
+        ];
+
+        const tryLoad = (index) => {
+            return new Promise((resolve, reject) => {
+                if (index >= umdSources.length) {
+                    reject(new Error('All UMD sources failed'));
+                    return;
                 }
-            };
-            script.onerror = () => {
-                reject(new Error('Failed to load UMD script'));
-            };
-            document.head.appendChild(script);
-        });
+                const script = document.createElement('script');
+                script.src = umdSources[index];
+                script.crossOrigin = 'anonymous';
+                script.onload = () => {
+                    if (window.supabase && typeof window.supabase.createClient === 'function') {
+                        resolve(window.supabase);
+                    } else {
+                        reject(new Error('UMD script loaded but createClient not found'));
+                    }
+                };
+                script.onerror = () => {
+                    TWOK_LOGGER.realtime(`[SupabaseClient] UMD source failed: ${umdSources[index]}`);
+                    tryLoad(index + 1).then(resolve, reject);
+                };
+                document.head.appendChild(script);
+            });
+        };
+
+        return tryLoad(0);
     }
 
     /**
