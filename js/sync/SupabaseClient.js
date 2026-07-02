@@ -70,6 +70,15 @@ class SupabaseClient {
      * Falls back through multiple providers for mobile compatibility
      */
     async _importSupabase() {
+        // Older Android WebViews may not support dynamic import() at all
+        // Skip directly to UMD script tag fallback
+        const supportsDynamicImport = (() => { try { return typeof import('data:text/javascript,') === 'object'; } catch(e) { return false; } })();
+        if (!supportsDynamicImport) {
+            TWOK_LOGGER.realtime('[SupabaseClient] Dynamic import not supported, using UMD script tag fallback');
+            const { createClient } = await this._loadSupabaseScript();
+            return { createClient };
+        }
+
         const cdnSources = [
             {
                 name: 'jsdelivr (+esm)',
