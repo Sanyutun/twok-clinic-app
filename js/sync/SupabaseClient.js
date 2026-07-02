@@ -70,28 +70,23 @@ class SupabaseClient {
      * Falls back through multiple providers for mobile compatibility
      */
     async _importSupabase() {
-        // Older Android WebViews may not support dynamic import() at all
-        // Skip directly to UMD script tag fallback
-        const supportsDynamicImport = (() => { try { return typeof import('data:text/javascript,') === 'object'; } catch(e) { return false; } })();
-        if (!supportsDynamicImport) {
-            TWOK_LOGGER.realtime('[SupabaseClient] Dynamic import not supported, using UMD script tag fallback');
+        // Try UMD script tag first — <script> tags work through more firewalls/proxies
+        // than dynamic import() and don't have CORS module restrictions.
+        try {
+            TWOK_LOGGER.realtime('[SupabaseClient] Trying UMD script tag (most compatible)...');
             const { createClient } = await this._loadSupabaseScript();
             return { createClient };
+        } catch (e) {
+            console.warn('[SupabaseClient] UMD script tag failed:', e.message);
+        }
+
+        // Older Android WebViews may not support dynamic import() at all
+        const supportsDynamicImport = (() => { try { return typeof import('data:text/javascript,') === 'object'; } catch(e) { return false; } })();
+        if (!supportsDynamicImport) {
+            throw new Error('Dynamic import not supported and UMD fallback already failed');
         }
 
         const cdnSources = [
-            {
-                name: 'jsdelivr (+esm)',
-                url: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/+esm'
-            },
-            {
-                name: 'jsdelivr (module)',
-                url: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/module/index.js'
-            },
-            {
-                name: 'unpkg (+esm)',
-                url: 'https://unpkg.com/@supabase/supabase-js@2.39.7/+esm'
-            },
             {
                 name: 'unpkg (module)',
                 url: 'https://unpkg.com/@supabase/supabase-js@2.39.7/dist/module/index.js'
@@ -99,6 +94,14 @@ class SupabaseClient {
             {
                 name: 'esm.sh',
                 url: 'https://esm.sh/@supabase/supabase-js@2.39.7'
+            },
+            {
+                name: 'jsdelivr (module)',
+                url: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/module/index.js'
+            },
+            {
+                name: 'jsdelivr (+esm)',
+                url: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/+esm'
             }
         ];
 
@@ -116,16 +119,6 @@ class SupabaseClient {
             }
         }
 
-        // Last resort: try injecting a script tag for the UMD build
-        try {
-            TWOK_LOGGER.realtime('[SupabaseClient] Trying UMD script tag fallback...');
-            const { createClient } = await this._loadSupabaseScript();
-            return { createClient };
-        } catch (e) {
-            lastError = e;
-            console.warn('[SupabaseClient] UMD script tag fallback also failed:', e.message);
-        }
-
         throw lastError || new Error('Failed to load Supabase client from any CDN source. Please check your internet connection.');
     }
 
@@ -135,8 +128,8 @@ class SupabaseClient {
      */
     _loadSupabaseScript() {
         const umdSources = [
-            'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.js',
-            'https://unpkg.com/@supabase/supabase-js@2.39.7/dist/umd/supabase.js'
+            'https://unpkg.com/@supabase/supabase-js@2.39.7/dist/umd/supabase.js',
+            'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.js'
         ];
 
         const tryLoad = (index) => {
