@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS appointments (
     consult_start_time TIMESTAMP WITH TIME ZONE,
     is_next BOOLEAN DEFAULT false,
     penalty_turns INTEGER DEFAULT 0,
+    waiting_turns INTEGER DEFAULT 0,
     edited_time TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

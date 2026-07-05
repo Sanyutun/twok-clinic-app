@@ -1816,6 +1816,7 @@ function renderPatientTable(filteredPatients = null) {
     elements.patientTableBody.innerHTML = paginatedData.map(patient => `
         <tr data-id="${patient.id}">
             <td>${escapeHtml(patient.id)}</td>
+            <td><svg class="patient-barcode" data-barcode="${escapeHtml(patient.id)}"></svg></td>
             <td>${escapeHtml(patient.name)}</td>
             <td>${escapeHtml(patient.age)}</td>
             <td>${escapeHtml(patient.sex)}</td>
@@ -1826,11 +1827,18 @@ function renderPatientTable(filteredPatients = null) {
             <td>
                 <div class="action-buttons">
                     <button type="button" class="btn btn-edit" onclick="editPatient(event, '${patient.id}')">Edit</button>
+                    <button type="button" class="btn btn-primary btn-sm print-barcode-btn" data-id="${escapeHtml(patient.id)}" data-name="${escapeHtml(patient.name)}" data-age="${escapeHtml(patient.age)}" data-address="${escapeHtml(patient.address)}" data-phone="${escapeHtml(patient.phone)}" title="Print barcode sticker">🖨️</button>
                     <button type="button" class="btn btn-danger" onclick="deletePatient(event, '${patient.id}')">Delete</button>
                 </div>
             </td>
         </tr>
     `).join('');
+
+    if (typeof JsBarcode !== 'undefined') {
+        elements.patientTableBody.querySelectorAll('.patient-barcode').forEach(svg => {
+            try { JsBarcode(svg, svg.dataset.barcode, { width: 1.5, height: 30, fontSize: 10, margin: 0 }); } catch (e) {}
+        });
+    }
 
     elements.patientTableBody.querySelectorAll('tr').forEach(row => {
         row.addEventListener('click', (e) => {
@@ -1840,7 +1848,300 @@ function renderPatientTable(filteredPatients = null) {
         });
     });
 
+    elements.patientTableBody.addEventListener('click', (e) => {
+        const btn = e.target.closest('.print-barcode-btn');
+        if (btn) {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            const name = btn.dataset.name;
+            const age = btn.dataset.age;
+            const address = btn.dataset.address || '';
+            const phone = btn.dataset.phone || '';
+            if (id) printBarcodeBluetooth(id, name, age, address, phone);
+        }
+    });
+
     renderPagination(elements.patientPagination, totalItems, patientCurrentPage, 'changePatientPage');
+}
+
+// ==================== BARCODE FUNCTIONS ====================
+
+function showPatientBarcode(patientId) {
+    const section = document.getElementById('patientBarcodeSection');
+    const container = document.getElementById('patientBarcodeContainer');
+    section.style.display = '';
+    container.innerHTML = `<svg id="formPatientBarcode" data-barcode="${patientId}"></svg>`;
+    setTimeout(() => {
+        if (typeof JsBarcode !== 'undefined') {
+            try { JsBarcode('#formPatientBarcode', patientId, { width: 2, height: 60, fontSize: 14, margin: 5 }); } catch (e) {}
+        }
+    }, 50);
+}
+
+async function printBarcodeBluetooth(patientId, patientName, patientAge, patientAddress, patientPhone) {
+    if (!navigator.bluetooth) {
+        showNotification('Bluetooth not supported in this browser', 'warning');
+        return;
+    }
+    try {
+        const printerUuids = [
+            '000018f0-0000-1000-8000-00805f9b34fb',
+            '0000ff00-0000-1000-8000-00805f9b34fb',
+            '0000a002-0000-1000-8000-00805f9b34fb',
+            '0000a003-0000-1000-8000-00805f9b34fb',
+            '0000ae30-0000-1000-8000-00805f9b34fb',
+            '0000fee0-0000-1000-8000-00805f9b34fb',
+            '0000fee7-0000-1000-8000-00805f9b34fb',
+        ];
+        const savedId = localStorage.getItem('btPrinterId');
+        let device = null;
+        if (savedId && navigator.bluetooth.getDevices) {
+            const devices = await navigator.bluetooth.getDevices();
+            device = devices.find(d => d.id === savedId) || null;
+        }
+        if (!device) {
+            device = await navigator.bluetooth.requestDevice({
+                acceptAllDevices: true,
+                optionalServices: printerUuids
+            });
+            try { localStorage.setItem('btPrinterId', device.id); } catch (e) {}
+        }
+        console.log('BLE device:', device.name, device.id);
+        const server = await device.gatt.connect();
+        console.log('GATT connected');
+        const services = await server.getPrimaryServices();
+        console.log('Services found:', services.length);
+        let characteristic = null;
+        for (const service of services) {
+            console.log('Checking service:', service.uuid);
+            try {
+                const chars = await service.getCharacteristics();
+                for (const c of chars) {
+                    console.log('  Char:', c.uuid, 'props:', JSON.stringify(Object.keys(c.properties).filter(k => c.properties[k])));
+                    if (c.properties.write || c.properties.writeWithoutResponse) {
+                        characteristic = c;
+                        break;
+                    }
+                }
+            } catch (e) {
+                console.log('  Error getting chars:', e.message);
+            }
+            if (characteristic) break;
+        }
+        if (!characteristic) {
+            showNotification('Could not find writable characteristic on this printer. Check console (F12) for service details.', 'warning');
+            return;
+        }
+        console.log('Using characteristic:', characteristic.uuid);
+        const stickerMmW = 40;
+        const stickerMmH = 30;
+        const dpi = 203;
+        const dotsPerMm = dpi / 25.4;
+        const printerW = Math.round(stickerMmW * dotsPerMm);
+        const printerH = Math.round(stickerMmH * dotsPerMm);
+        const scale = 4;
+        const canvas = document.createElement('canvas');
+        canvas.width = printerW * scale;
+        canvas.height = printerH * scale;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const pad = 8 * scale;
+        const availW = canvas.width - pad * 2;
+        const drawX = canvas.width / 2;
+        ctx.fillStyle = '#000000';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        let y = pad;
+        ctx.font = `bold ${30 * scale}px Arial, 'Noto Sans Myanmar', 'Padauk', 'Myanmar Text', sans-serif`;
+        const nameLines = wrapText(ctx, patientName, availW);
+        const nameLineH = 36 * scale;
+        for (const line of nameLines) {
+            ctx.fillText(line, drawX, y);
+            y += nameLineH;
+        }
+        y += 3 * scale;
+        ctx.textAlign = 'left';
+        ctx.font = `bold ${22 * scale}px Arial, 'Noto Sans Myanmar', 'Padauk', 'Myanmar Text', sans-serif`;
+        const ageText = patientAge ? 'Age: ' + patientAge : '';
+        const addrText = patientAddress ? '(' + patientAddress.split('\n')[0].substring(0, 30) + ')' : '';
+        const combined = [ageText, addrText].filter(Boolean).join('  ');
+        if (combined) {
+            ctx.fillText(combined, pad, y);
+            y += 28 * scale;
+        }
+        if (patientPhone) {
+            ctx.fillText('Tel: ' + patientPhone, pad, y);
+            y += 28 * scale;
+        }
+        y += 2 * scale;
+        ctx.textAlign = 'center';
+        if (typeof JsBarcode !== 'undefined') {
+            const barcodeMmW = 36;
+            const barcodeH = Math.max(canvas.height - y - pad * 2, 60 * scale);
+            const barcodeTargetW = Math.round(barcodeMmW * dotsPerMm * scale);
+            const barcodeCanvas = document.createElement('canvas');
+            JsBarcode(barcodeCanvas, patientId, {
+                format: 'CODE128',
+                width: 2.5 * scale,
+                height: Math.round(barcodeH * 1.5),
+                displayValue: true,
+                fontSize: 12 * scale,
+                margin: 5 * scale
+            });
+            const bx = (canvas.width - barcodeTargetW) / 2;
+            ctx.drawImage(barcodeCanvas, bx, y, barcodeTargetW, barcodeH);
+        }
+        const printerCanvas = document.createElement('canvas');
+        printerCanvas.width = printerW;
+        printerCanvas.height = printerH;
+        const printerCtx = printerCanvas.getContext('2d');
+        printerCtx.imageSmoothingEnabled = true;
+        printerCtx.imageSmoothingQuality = 'high';
+        printerCtx.drawImage(canvas, 0, 0, printerW, printerH);
+        const imageData = printerCtx.getImageData(0, 0, printerW, printerH);
+        const pixels = imageData.data;
+        const bytesPerRow = Math.ceil(printerW / 8);
+        const imageBytes = new Uint8Array(bytesPerRow * printerH);
+        for (let y = 0; y < printerH; y++) {
+            for (let x = 0; x < printerW; x++) {
+                const idx = (y * printerW + x) * 4;
+                const gray = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
+                if (gray < 128) {
+                    const byteIdx = y * bytesPerRow + (x >> 3);
+                    const bitIdx = 7 - (x & 7);
+                    imageBytes[byteIdx] |= (1 << bitIdx);
+                }
+            }
+        }
+        const chunkSize = 100;
+        const header = new Uint8Array([0x1D, 0x76, 0x30, 0,
+            bytesPerRow & 0xFF, (bytesPerRow >> 8) & 0xFF,
+            printerH & 0xFF, (printerH >> 8) & 0xFF]);
+        const gapFeed = new Uint8Array([0x1D, 0x0C]);
+        await characteristic.writeValue(gapFeed);
+        await characteristic.writeValue(gapFeed);
+        await characteristic.writeValue(gapFeed);
+        await characteristic.writeValue(header);
+        for (let i = 0; i < imageBytes.length; i += chunkSize) {
+            await characteristic.writeValue(imageBytes.subarray(i, i + chunkSize));
+        }
+        await characteristic.writeValue(gapFeed);
+        showNotification('Barcode sticker printed successfully');
+    } catch (err) {
+        console.error('Print error:', err);
+        if (err.message !== 'User cancelled') {
+            showNotification('Bluetooth print failed: ' + err.message, 'warning');
+        }
+    }
+}
+
+function wrapText(ctx, text, maxWidth) {
+    if (!text) return [''];
+    const words = text.split('');
+    const lines = [];
+    let current = '';
+    for (const ch of words) {
+        const test = current + ch;
+        if (ctx.measureText(test).width > maxWidth && current) {
+            lines.push(current);
+            current = ch;
+        } else {
+            current = test;
+        }
+    }
+    if (current) lines.push(current);
+    return lines.length ? lines : [text];
+}
+
+let html5QrCode = null;
+let scanContext = 'patient';
+
+function openBarcodeScanner(context) {
+    scanContext = context || 'patient';
+    const modal = document.getElementById('barcodeScannerModal');
+    const container = document.getElementById('barcodeScannerContainer');
+    const result = document.getElementById('barcodeScanResult');
+    modal.classList.remove('hidden');
+    result.textContent = '';
+    container.innerHTML = '<div id="barcodeScannerReader" style="width: 100%; max-width: 400px; margin: 0 auto; position: relative;"></div><div class="scan-line"></div>';
+    if (typeof Html5Qrcode === 'undefined') {
+        result.textContent = 'Scanner library not loaded. Please refresh the page.';
+        return;
+    }
+    result.textContent = 'Initializing camera...';
+    html5QrCode = new Html5Qrcode('barcodeScannerReader');
+    Html5Qrcode.getCameras().then(cameras => {
+        if (!cameras || cameras.length === 0) {
+            result.innerHTML = '📷 No camera found.<br><br>Please connect a camera and try again.';
+            return;
+        }
+        const config = {
+            fps: 30,
+            qrbox: { width: 300, height: 200 },
+            formatsToSupport: [
+                Html5QrcodeSupportedFormats.CODE_128,
+                Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.QR_CODE
+            ],
+            rememberLastUsedCamera: true,
+            showTorchButtonIfSupported: true
+        };
+        const envCamera = cameras.find(c => c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('rear') || c.label.toLowerCase().includes('environment'));
+        const cameraId = envCamera ? envCamera.id : cameras[0].id;
+        html5QrCode.start(
+            { deviceId: { exact: cameraId } },
+            config,
+            onBarcodeScanSuccess,
+            onBarcodeScanFailure
+        ).catch(err => {
+            if (err.toString().includes('NotAllowedError') || err.toString().includes('Permission denied')) {
+                result.innerHTML = '📷 Camera access denied.<br><br>Please allow camera access:<br>• Click the camera icon 🔒 in the address bar and select "Allow"<br>• Or check your system privacy settings (Settings > Privacy & security > Camera)<br>• Then refresh the page and try again.';
+            } else if (err.toString().includes('NotFoundError')) {
+                result.innerHTML = '📷 No camera found.<br><br>Please connect a camera and try again.';
+            } else {
+                result.textContent = 'Camera error: ' + err;
+            }
+        });
+    }).catch(err => {
+        if (err.toString().includes('NotAllowedError') || err.toString().includes('Permission denied')) {
+            result.innerHTML = '📷 Camera access denied.<br><br>Please allow camera access:<br>• Click the camera icon 🔒 in the address bar and select "Allow"<br>• Or check your system privacy settings (Settings > Privacy & security > Camera)<br>• Then refresh the page and try again.';
+        } else {
+            result.textContent = 'Camera error: ' + err;
+        }
+    });
+}
+
+function onBarcodeScanSuccess(decodedText) {
+    const result = document.getElementById('barcodeScanResult');
+    result.textContent = 'Scanned: ' + decodedText;
+    closeBarcodeScanner();
+    const patient = patients.find(p => p.id === decodedText);
+    if (!patient) {
+        showNotification('Patient not found: ' + decodedText, 'warning');
+        return;
+    }
+    if (scanContext === 'appointment') {
+        const filtered = appointments.filter(a => a.patientId === decodedText || a.patientName === patient.name);
+        renderAppointmentTable(filtered);
+        switchSection('appointment');
+    } else if (scanContext === 'pharmacist') {
+        renderPharmacistCorner(decodedText);
+        switchSection('pharmacist');
+    } else {
+        loadPatientToForm(patient.id);
+        switchSection('patient');
+    }
+}
+
+function onBarcodeScanFailure(err) {}
+
+function closeBarcodeScanner() {
+    if (html5QrCode) {
+        try { html5QrCode.stop(); } catch (e) {}
+        html5QrCode = null;
+    }
+    document.getElementById('barcodeScannerModal').classList.add('hidden');
 }
 
 // ==================== DOCTOR TABLE ====================
@@ -1978,11 +2279,13 @@ function loadPatientToForm(patientId) {
     // Editing is always from patient tab
     window.patientFormSourceSection = 'patient';
     
+    // Show barcode for this patient
+    showPatientBarcode(p.id);
+    
     // Load appointment timeline for this patient
     loadPatientAppointmentTimeline(p.id);
     
     openPatientFormModal();
-    elements.patientName.focus();
 }
 
 /**
@@ -2224,6 +2527,10 @@ function resetPatientForm() {
     const timelineContainer = document.getElementById('patientAppointmentTimeline');
     timelineSection.style.display = 'none';
     timelineContainer.innerHTML = '';
+
+    // Hide barcode section
+    document.getElementById('patientBarcodeSection').style.display = 'none';
+    document.getElementById('patientBarcodeContainer').innerHTML = '';
     
     generatePatientId();
     elements.patientName.focus();
@@ -2649,7 +2956,8 @@ function getBookingTypeClass(type) {
         'Emergency': 'booking-type-emergency',
         'VIP': 'booking-type-vip',
         'Regular': 'booking-type-regular',
-        'FOC': 'booking-type-foc'
+        'FOC': 'booking-type-foc',
+        'Echo Urgent': 'booking-type-urgent'
     };
     return typeMap[type] || 'booking-type-regular';
 }
@@ -2660,7 +2968,8 @@ function getQueueNumberClass(type, number) {
         'Emergency': 'queue-number-emergency',
         'VIP': 'queue-number-vip',
         'Regular': 'queue-number-regular',
-        'FOC': 'queue-number-foc'
+        'FOC': 'queue-number-foc',
+        'Echo Urgent': 'queue-number-urgent'
     };
     return typeMap[type] || 'queue-number-regular';
 }
@@ -2857,21 +3166,14 @@ function renderAppointmentTable(filteredAppointments = null) {
             return aPriority - bPriority;
         }
 
-        // Priority 4: Waiting turns (Echo Urgent patients with turns wait)
-        const aWaiting = a.bookingType === 'Echo Urgent' ? (a.waitingTurns || 0) : 0;
-        const bWaiting = b.bookingType === 'Echo Urgent' ? (b.waitingTurns || 0) : 0;
-
-        if (aWaiting > 0 && bWaiting === 0) return 1;
-        if (aWaiting === 0 && bWaiting > 0) return -1;
-
-        // Priority 5: Penalty (patients without penalty first)
+        // Priority 4: Penalty (patients without penalty first)
         const aHasPenalty = a.penaltyTurns && a.penaltyTurns > 0;
         const bHasPenalty = b.penaltyTurns && b.penaltyTurns > 0;
 
         if (aHasPenalty && !bHasPenalty) return 1;
         if (!aHasPenalty && bHasPenalty) return -1;
 
-        // Priority 6: Booking number ascending
+        // Priority 5: Booking number ascending
         if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
         if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
         return parseInt(a.bookingNumber, 10) - parseInt(b.bookingNumber, 10);
@@ -2945,6 +3247,7 @@ function renderAppointmentTable(filteredAppointments = null) {
         } else {
             actionButtonHtml = `<span style="color: var(--text-secondary); font-size: 0.85rem;">${actionConfig.icon} ${actionConfig.label}</span>`;
         }
+        const printBtnHtml = `<button type="button" class="action-btn action-btn-print" onclick="printAppointmentBarcode(event, '${appt.id}')" title="Print barcode sticker">🖨️</button>`;
 
         // Optimized lab icons using pre-calculated map
         const apptPatientId = appt.patientId ? String(appt.patientId) : null;
@@ -2971,8 +3274,8 @@ function renderAppointmentTable(filteredAppointments = null) {
                 <td><span class="booking-type-badge ${typeClass}">${appt.bookingType}</span></td>
                 <td><span class="status-badge ${statusClass}">${appt.status}</span></td>
                 <td>${arrivalTimeDisplay}</td>
-                <td>${appt.penaltyTurns && appt.penaltyTurns > 0 ? `<span class="penalty-badge-appointment">+${appt.penaltyTurns} turns</span>` : '<span style="color: var(--text-secondary);">-</span>'}</td>
-                <td>${actionButtonHtml}</td>
+                <td>${appt.penaltyTurns && appt.penaltyTurns > 0 ? `<span class="penalty-badge-appointment">+${appt.penaltyTurns} turns</span>` : appt.bookingType === 'Echo Urgent' && appt.waitingTurns > 0 ? `<span class="waiting-badge-appointment">Echo wait - ${appt.waitingTurns}</span>` : '<span style="color: var(--text-secondary);">-</span>'}</td>
+                <td>${printBtnHtml} ${actionButtonHtml}</td>
             </tr>
         `;
     }).join('');
@@ -3249,6 +3552,15 @@ function handleAppointmentAction(event, appointmentId) {
     }
 }
 
+function printAppointmentBarcode(event, appointmentId) {
+    event.stopPropagation();
+    const appt = appointments.find(a => a.id === appointmentId);
+    if (!appt) return;
+    const patient = patients.find(p => p.id === appt.patientId || p.name === appt.patientName);
+    const address = patient ? patient.address : '';
+    printBarcodeBluetooth(appt.patientId || '', appt.patientName || '', appt.age || '', address, appt.phone || '');
+}
+
 /**
  * Mark appointment as Booked (from Noted)
  */
@@ -3298,11 +3610,16 @@ async function markAppointmentArrived(appointmentId) {
         showNotification(`Echo Urgent patient! Patient #${appt.bookingNumber || '-'} receives ${waitingTurnsSetting} waiting turns.`, 'info');
     } else {
         // Calculate penalty for late arrival for other booking types
-        const consultingNow = getCurrentlyConsultingNumber(appt.doctorName);
+        const today = toLocalDateString(new Date());
+        const consultedCount = appointments.filter(a =>
+            a.doctorName === TARGET_DOCTOR_NAME &&
+            a.status === 'Done' &&
+            (a.appointmentTime?.startsWith(today) || a.createdAt?.startsWith(today))
+        ).length;
         const patientBookingNum = parseInt(appt.bookingNumber, 10) || 999;
 
-        // If patient's booking number has already passed, apply penalty turns from settings
-        if (consultingNow > 0 && patientBookingNum < consultingNow) {
+        // If patient's booking number has already been consulted, apply penalty turns from settings
+        if (consultedCount > 0 && patientBookingNum <= consultedCount) {
             appt.penaltyTurns = penaltyTurnsSetting;
             showNotification(`Late arrival! Patient #${patientBookingNum} receives ${penaltyTurnsSetting}-turn penalty`, 'error');
         } else {
@@ -3601,7 +3918,7 @@ function sortAppointmentsForQueue(appts) {
             
             // Echo Urgent logic: behaves like penalty turns — wait for turns to expire
             if (appt.bookingType === 'Echo Urgent') {
-                return (appt.waitingTurns || 0) > 0 ? 6 : 4; // 6 if still waiting, 4 (same as normal) when ready
+                return (appt.waitingTurns || 0) > 0 ? 6 : 3; // 6 if still waiting, 3 (ahead of normal) when ready
             }
             
             // Normal patients
@@ -3761,10 +4078,10 @@ function updateQueueSummary() {
     // Find current consulting patient
     const currentConsult = doctorAppointments.find(a => a.status === 'In Consult');
 
-    // Check if next patient has penalty
+    // Check if next patient has penalty or echo waiting turns
     let nextPatientDisplay = '-';
     if (nextPatient) {
-        const penaltyInfo = nextPatient.penaltyTurns > 0 ? ` ⚠️` : '';
+        const penaltyInfo = nextPatient.penaltyTurns > 0 ? ` ⚠️` : nextPatient.bookingType === 'Echo Urgent' && nextPatient.waitingTurns > 0 ? ` Echo wait - ${nextPatient.waitingTurns}` : '';
         const lockedInfo = nextPatient.isNext ? ' 🔒' : '';
         nextPatientDisplay = `${nextPatient.patientName} (#${nextPatient.bookingNumber || '-'})${penaltyInfo}${lockedInfo}`;
     }
@@ -3973,10 +4290,13 @@ function showCandidate(index) {
         candidate.category === 'penalty' ? '⚠️ Penalty' : '🙋 Arrived';
     elements.nextPatientCategory.className = 'patient-card-badge ' + candidate.category;
 
-    // Show penalty info if applicable
+    // Show penalty or echo waiting info if applicable
     if (candidate.category === 'penalty') {
         elements.nextPatientPenaltyInfo.classList.remove('hidden');
         elements.nextPatientPenaltyText.textContent = `${patient.penaltyTurns} penalty turn${patient.penaltyTurns > 1 ? 's' : ''} remaining`;
+    } else if (patient.bookingType === 'Echo Urgent' && patient.waitingTurns > 0) {
+        elements.nextPatientPenaltyInfo.classList.remove('hidden');
+        elements.nextPatientPenaltyText.textContent = `Echo wait - ${patient.waitingTurns} turn${patient.waitingTurns > 1 ? 's' : ''} remaining`;
     } else {
         elements.nextPatientPenaltyInfo.classList.add('hidden');
     }
@@ -4194,7 +4514,7 @@ function renderInstructionTableWithSaved() {
                         </div>
                     </div>
                 `;
-            }).join('');
+    }).join('');
         }
         
         let buttonHtml;
@@ -4862,6 +5182,12 @@ async function saveAppointment(e) {
         editedTime: toLocalISOString(new Date())
     };
 
+    // Clear arrival/consult times if status indicates patient hasn't arrived
+    if (status === 'Booked' || status === 'Noted') {
+        data.arrivalTime = null;
+        data.consultStartTime = null;
+    }
+
     // Track status change time
     const statusTimeKey = status.toLowerCase().replace(' ', '') + 'Time';
     data[statusTimeKey] = toLocalISOString(new Date());
@@ -4878,6 +5204,11 @@ async function saveAppointment(e) {
                     data[key] = existing[key];
                 }
             });
+            // Re-clear times if status is Booked or Noted (patient hasn't arrived)
+            if (status === 'Booked' || status === 'Noted') {
+                data.arrivalTime = null;
+                data.consultStartTime = null;
+            }
             appointments[idx] = data;
             await saveAppointmentsToStorage(data.id);
             showNotification('Appointment updated successfully!');
@@ -5508,6 +5839,12 @@ async function saveCalendarAppointment(e) {
         createdAt: toLocalISOString(new Date())
     };
 
+    // Clear arrival/consult times if status indicates patient hasn't arrived
+    if (status === 'Booked' || status === 'Noted') {
+        data.arrivalTime = null;
+        data.consultStartTime = null;
+    }
+
     appointments.push(data);
     await saveAppointmentsToStorage(data.id);
 
@@ -5896,6 +6233,26 @@ function setupEventListeners() {
     elements.addAddressBtn.addEventListener('click', addAddress);
     elements.newAddressInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addAddress(); });
     elements.addressModal.addEventListener('click', (e) => { if (e.target === elements.addressModal) closeAddressModal(); });
+
+    // Barcode - Scan button
+    document.getElementById('scanBarcodeBtn').addEventListener('click', () => openBarcodeScanner('patient'));
+    document.getElementById('scanBarcodeApptBtn').addEventListener('click', () => openBarcodeScanner('appointment'));
+    document.getElementById('scanBarcodePharmBtn').addEventListener('click', () => openBarcodeScanner('pharmacist'));
+    document.getElementById('closeBarcodeScanner').addEventListener('click', closeBarcodeScanner);
+    document.getElementById('stopBarcodeScanner').addEventListener('click', closeBarcodeScanner);
+    document.getElementById('barcodeScannerModal').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('barcodeScannerModal')) closeBarcodeScanner();
+    });
+
+    // Barcode - Print button in patient form
+    document.getElementById('printBarcodeBtn').addEventListener('click', () => {
+        const patientId = document.getElementById('patientId').value;
+        const patientName = document.getElementById('patientName').value;
+        const patientAge = document.getElementById('patientAge').value;
+        const patientAddress = document.getElementById('patientAddress').value;
+        const patientPhone = document.getElementById('patientPhone').value;
+        if (patientId) printBarcodeBluetooth(patientId, patientName, patientAge, patientAddress, patientPhone);
+    });
 
     // Doctor Search
     elements.doctorSearchInput.addEventListener('input', (e) => searchDoctors(e.target.value));
@@ -7040,7 +7397,7 @@ function renderBookingEditorTable() {
     elements.bookingEditorTableBody.innerHTML = bookingEditorAppointments.map((appt, index) => {
         const bookingTypeClass = appt.bookingType ? appt.bookingType.toLowerCase() : 'regular';
         const statusClass = appt.status ? appt.status.toLowerCase().replace(' ', '-') : '';
-        const arrivalTime = appt.arrivedTime ? formatDateTime(appt.arrivedTime) : '-';
+        const arrivalTime = appt.arrivalTime ? formatDateTime(appt.arrivalTime) : (appt.arrivedTime ? formatDateTime(appt.arrivedTime) : '-');
         
         return `
             <tr data-index="${index}">
@@ -8001,11 +8358,11 @@ function getAppointmentLabRecords(appointmentId) {
 /**
  * Render Pharmacist Corner
  */
-function renderPharmacistCorner() {
+function renderPharmacistCorner(patientIdFilter) {
     const today = toLocalDateString(new Date());
 
     // Get today's completed appointments (status = 'Done')
-    const todayAppointments = appointments.filter(appt => {
+    let todayAppointments = appointments.filter(appt => {
         const apptDate = appt.appointmentTime ? appt.appointmentTime.split('T')[0] : '';
         const isDoneToday = apptDate === today && appt.status !== 'Cancelled';
         if (!isDoneToday) return false;
@@ -8015,6 +8372,16 @@ function renderPharmacistCorner() {
         // Only show if doctor needs instructions (defaults to true if doctor not found or flag not set)
         return doctor ? (doctor.needInstruction !== false) : true;
     });
+    // Persist filter across re-renders
+    if (patientIdFilter !== undefined) {
+        window._pharmacistFilterId = patientIdFilter;
+    }
+    const activeFilter = patientIdFilter !== undefined ? patientIdFilter : window._pharmacistFilterId;
+    // Filter to show only scanned patient's appointments
+    if (activeFilter) {
+        const patient = patients.find(p => p.id === activeFilter);
+        todayAppointments = todayAppointments.filter(a => a.patientId === activeFilter || a.patientName === (patient ? patient.name : ''));
+    }
 
     // Calculate statistics
     const totalPatients = todayAppointments.length;
@@ -8282,6 +8649,7 @@ function setupPharmacistCornerListeners() {
     if (elements.pharmacistSearchInput) {
         elements.pharmacistSearchInput.addEventListener('input', (e) => {
             pharmacistSearchTerm = e.target.value.trim();
+            window._pharmacistFilterId = null;
             renderPharmacistCorner();
         });
     }
@@ -8292,6 +8660,7 @@ function setupPharmacistCornerListeners() {
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             e.target.classList.add('active');
             pharmacistCurrentFilter = e.target.dataset.filter;
+            window._pharmacistFilterId = null;
             renderPharmacistCorner();
         });
     });

@@ -50,6 +50,9 @@
                     >
                     <span class="search-icon">🔍</span>
                 </div>
+                <button type="button" id="scanBarcodeBtn" class="btn btn-secondary new-record-btn" title="Scan patient barcode">
+                    📷 Scan
+                </button>
                 <button type="button" id="newPatientBtn" class="btn btn-primary new-record-btn">
                     + New Patient
                 </button>
@@ -71,6 +74,7 @@
                         <thead>
                             <tr>
                                 <th>Patient ID</th>
+                                <th>Barcode</th>
                                 <th>Name</th>
                                 <th>Age</th>
                                 <th>Sex</th>
@@ -94,29 +98,48 @@
                 </div>
                 <div id="patientPagination" class="pagination-container"></div>
             </section>
+        </section>
 
-            <!-- Address Management Modal -->
-            <div id="addressModal" class="modal hidden">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h3>Manage Addresses</h3>
-                        <button type="button" id="closeAddressModal" class="modal-close">&times;</button>
+        <!-- Barcode Scanner Modal -->
+        <div id="barcodeScannerModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Scan Patient Barcode</h3>
+                    <button type="button" id="closeBarcodeScanner" class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="barcodeScannerContainer">
+                        <div class="scan-line"></div>
                     </div>
-                    <div class="modal-body">
-                        <ul id="addressListManage" class="manage-list"></ul>
-                        <div class="add-item-form">
-                            <input
-                                type="text"
-                                id="newAddressInput"
-                                class="form-control"
-                                placeholder="Enter new address"
-                            >
-                            <button type="button" id="addAddressBtn" class="btn btn-primary">Add</button>
-                        </div>
+                    <p id="barcodeScanResult" class="barcode-scan-result"></p>
+                    <div class="barcode-scan-actions">
+                        <button type="button" id="stopBarcodeScanner" class="btn btn-secondary">Stop Scanner</button>
                     </div>
                 </div>
             </div>
-        </section>
+        </div>
+
+        <!-- Address Management Modal -->
+        <div id="addressModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Manage Addresses</h3>
+                    <button type="button" id="closeAddressModal" class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <ul id="addressListManage" class="manage-list"></ul>
+                    <div class="add-item-form">
+                        <input
+                            type="text"
+                            id="newAddressInput"
+                            class="form-control"
+                            placeholder="Enter new address"
+                        >
+                        <button type="button" id="addAddressBtn" class="btn btn-primary">Add</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- Doctor Section -->
         <section id="doctorSection" class="module-section hidden">
@@ -492,6 +515,18 @@
                         </div>
                     </div>
 
+                    <!-- Barcode Section -->
+                    <div class="form-row" id="patientBarcodeSection" style="display: none;">
+                        <div class="form-group full-width">
+                            <div class="barcode-display">
+                                <div id="patientBarcodeContainer"></div>
+                                <div class="barcode-actions">
+                                    <button type="button" id="printBarcodeBtn" class="btn btn-primary btn-sm">🖨️ Print Barcode</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Appointment Timeline Section -->
                     <div class="form-row" id="patientAppointmentTimelineSection" style="display: none;">
                         <div class="form-group full-width">
@@ -651,6 +686,9 @@
                     <option value="">All Doctors</option>
                 </select>
             </div>
+            <button type="button" id="scanBarcodeApptBtn" class="btn btn-secondary new-record-btn" title="Scan patient barcode to find appointment">
+                📷 Scan
+            </button>
             <button type="button" id="newAppointmentBtn" class="btn btn-primary new-record-btn">
                 + New Appointment
             </button>
@@ -1769,6 +1807,9 @@
                 >
                 <span class="search-icon">🔍</span>
             </div>
+            <button type="button" id="scanBarcodePharmBtn" class="btn btn-secondary new-record-btn" title="Scan patient barcode to find in pharmacist corner">
+                📷 Scan
+            </button>
             <div class="filter-buttons">
                 <button type="button" class="filter-btn active" data-filter="all">All</button>
                 <button type="button" class="filter-btn" data-filter="pending">Pending</button>
@@ -2262,6 +2303,8 @@
     <script src="script.js"></script>
     <script src="views/todo-view.js"></script>
     <script src="components/expense-form.js"></script>
+    <script src="lib/JsBarcode.all.min.js"></script>
+    <script src="lib/html5-qrcode.min.js"></script>
     <script>
         // Register Service Worker for PWA
         if ('serviceWorker' in navigator) {

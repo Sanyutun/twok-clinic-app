@@ -282,6 +282,10 @@
                 width: 8% !important;
             }
 
+            .col-waiting {
+                width: 8% !important;
+            }
+
             .col-time {
                 display: none !important; /* Omit Arrival Time in portrait */
             }
@@ -371,7 +375,12 @@
         }
 
         .col-penalty {
-            width: 15%;
+            width: 12%;
+            text-align: center;
+        }
+
+        .col-waiting {
+            width: 10%;
             text-align: center;
         }
 
@@ -384,6 +393,16 @@
         .penalty-badge {
             display: inline-block;
             background: #e74c3c;
+            color: #fff;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: clamp(12px, 1.8vh, 18px);
+            font-weight: 700;
+        }
+
+        .waiting-badge {
+            display: inline-block;
+            background: #f39c12;
             color: #fff;
             padding: 2px 8px;
             border-radius: 10px;
@@ -821,16 +840,21 @@
             const arrived = appointments
                 .filter(a => arrivedStatuses.includes(a.status))
                 .sort((a, b) => {
-                    // Sort by booking number in ascending order (0, 1, 2, 3, ...)
-                    // null/undefined booking numbers go to the end
+                    const getPriority = (p) => {
+                        if (p.bookingType === 'Emergency') return 1;
+                        if (p.status === 'Investigation') return 2;
+                        if (p.bookingType === 'Echo Urgent') {
+                            return (p.waitingTurns || 0) > 0 ? 7 : 3;
+                        }
+                        return (p.penaltyTurns || 0) > 0 ? 6 : 4;
+                    };
+                    const aPrio = getPriority(a);
+                    const bPrio = getPriority(b);
+                    if (aPrio !== bPrio) return aPrio - bPrio;
+
+                    // Sort by booking number ascending
                     if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
                     if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
-
-                    // Both non-emergency: penalty first, then booking number
-                    if (a.penaltyTurns && !b.penaltyTurns) return 1;
-                    if (!a.penaltyTurns && b.penaltyTurns) return -1;
-
-                    // Sort by booking number ascending (0 comes before 1, 2, 3, etc.)
                     return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
                 });
 
@@ -899,16 +923,21 @@
             const arrived = appointments
                 .filter(a => arrivedStatuses.includes(a.status))
                 .sort((a, b) => {
-                    // Sort by booking number in ascending order (0, 1, 2, 3, ...)
-                    // null/undefined booking numbers go to the end
+                    const getPriority = (p) => {
+                        if (p.bookingType === 'Emergency') return 1;
+                        if (p.status === 'Investigation') return 2;
+                        if (p.bookingType === 'Echo Urgent') {
+                            return (p.waitingTurns || 0) > 0 ? 7 : 3;
+                        }
+                        return (p.penaltyTurns || 0) > 0 ? 6 : 4;
+                    };
+                    const aPrio = getPriority(a);
+                    const bPrio = getPriority(b);
+                    if (aPrio !== bPrio) return aPrio - bPrio;
+
+                    // Sort by booking number ascending
                     if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
                     if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
-
-                    // Both non-emergency: penalty first, then booking number
-                    if (a.penaltyTurns && !b.penaltyTurns) return 1;
-                    if (!a.penaltyTurns && b.penaltyTurns) return -1;
-
-                    // Sort by booking number ascending (0 comes before 1, 2, 3, etc.)
                     return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
                 });
 
@@ -966,12 +995,13 @@
                                             <th class="col-name"></th>
                                             <th class="col-age">Age</th>
                                             <th class="col-penalty">Penalty</th>
+                                            <th class="col-waiting">Waiting</th>
                                             <th class="col-time">Arrival Time</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         ${leftPatients.length === 0 ?
-                                            '<tr><td colspan="5" style="text-align: center; color: #999; padding: 40px;">No patients waiting</td></tr>' :
+                                            '<tr><td colspan="6" style="text-align: center; color: #999; padding: 40px;">No patients waiting</td></tr>' :
                                             leftPatients.map(patient => {
                                                 // Check for long wait (more than 2 hours)
                                                 let longWaitBadge = '';
@@ -993,7 +1023,8 @@
                                                     </td>
                                                     <td class="col-name">${patient.patientName}</td>
                                                     <td class="col-age">${patient.age}</td>
-                                                    <td class="col-penalty">${patient.penaltyTurns ? `<span class="penalty-badge">+${patient.penaltyTurns}</span>` : '-'}</td>
+                                                    <td class="col-penalty">${patient.penaltyTurns ? `<span class="penalty-badge">+${patient.penaltyTurns}</span>` : patient.bookingType === 'Echo Urgent' && patient.waitingTurns > 0 ? `<span class="waiting-badge">Echo wait - ${patient.waitingTurns}</span>` : '-'}</td>
+                                                    <td class="col-waiting">${patient.bookingType === 'Echo Urgent' && patient.waitingTurns > 0 ? `<span class="waiting-badge">${patient.waitingTurns}</span>` : '-'}</td>
                                                     <td class="col-time">${formatTime(patient.arrivalTime)}</td>
                                                 </tr>
                                                 `;
@@ -1002,7 +1033,7 @@
                                     </tbody>
                                 </table>
                             </div>
-                            
+
                             <!-- Right Column -->
                             <div class="waiting-column">
                                 <div class="column-header">
@@ -1016,12 +1047,13 @@
                                             <th class="col-name"></th>
                                             <th class="col-age">Age</th>
                                             <th class="col-penalty">Penalty</th>
+                                            <th class="col-waiting">Waiting</th>
                                             <th class="col-time">Arrival Time</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         ${rightPatients.length === 0 ?
-                                            '<tr><td colspan="5" style="text-align: center; color: #999; padding: 40px;">No patients waiting</td></tr>' :
+                                            '<tr><td colspan="6" style="text-align: center; color: #999; padding: 40px;">No patients waiting</td></tr>' :
                                             rightPatients.map(patient => {
                                                 // Check for long wait (more than 2 hours)
                                                 let longWaitBadge = '';
@@ -1043,7 +1075,8 @@
                                                     </td>
                                                     <td class="col-name">${patient.patientName}</td>
                                                     <td class="col-age">${patient.age}</td>
-                                                    <td class="col-penalty">${patient.penaltyTurns ? `<span class="penalty-badge">+${patient.penaltyTurns}</span>` : '-'}</td>
+                                                    <td class="col-penalty">${patient.penaltyTurns ? `<span class="penalty-badge">+${patient.penaltyTurns}</span>` : patient.bookingType === 'Echo Urgent' && patient.waitingTurns > 0 ? `<span class="waiting-badge">Echo wait - ${patient.waitingTurns}</span>` : '-'}</td>
+                                                    <td class="col-waiting">${patient.bookingType === 'Echo Urgent' && patient.waitingTurns > 0 ? `<span class="waiting-badge">${patient.waitingTurns}</span>` : '-'}</td>
                                                     <td class="col-time">${formatTime(patient.arrivalTime)}</td>
                                                 </tr>
                                                 `;

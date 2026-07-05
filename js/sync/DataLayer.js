@@ -38,9 +38,9 @@ class DataLayer {
                 'doctorId', 'doctorName', 'appointmentTime', 'bookingType', 
                 'bookingNumber', 'status', 'notes', 'waitingTime', 
                 'consultationTime', 'doneTime', 'postponeTime', 'createdAt', 
-                'updatedAt', 'bookedTime', 'notedTime', 'arrivalTime', 'arrivedTime',
+                'updatedAt', 'bookedTime', 'notedTime', 'arrivalTime',
                 'inconsultTime', 'investigationTime', 'consultStartTime',
-                'isNext', 'penaltyTurns', 'editedTime', 'needInstruction'
+                'isNext', 'penaltyTurns', 'waitingTurns', 'editedTime', 'needInstruction'
             ],
             'instructions': [
                 'id', 'appointmentId', 'patientId', 'patientName', 'age', 'phone', 
@@ -574,6 +574,7 @@ class DataLayer {
             'consultStartTime': 'consult_start_time',
             'isNext': 'is_next',
             'penaltyTurns': 'penalty_turns',
+            'waitingTurns': 'waiting_turns',
             'needInstruction': 'need_instruction',
             'returnDuration': 'return_duration',
             'returnUnit': 'return_unit',
@@ -609,12 +610,6 @@ class DataLayer {
             mapped.labId = mapped.id;
             mapped.LabID = mapped.id;
         }
-
-        // Special handling for legacy field compatibility
-        // Use the already mapped camelCase fields to populate legacy fields
-        if (mapped.createdAt) mapped.createdTime = mapped.createdAt;
-        if (mapped.arrivalTime) mapped.arrivedTime = mapped.arrivalTime;
-        if (mapped.updatedAt) mapped.editedTime = mapped.updatedAt;
 
         // Special handling for settings table updated_at mapping
         if (table === 'settings' && mapped.updatedAt) {
@@ -668,6 +663,7 @@ class DataLayer {
             'consultStartTime': 'consult_start_time',
             'isNext': 'is_next',
             'penaltyTurns': 'penalty_turns',
+            'waitingTurns': 'waiting_turns',
             'needInstruction': 'need_instruction',
             'returnDuration': 'return_duration',
             'returnUnit': 'return_unit',
@@ -731,7 +727,7 @@ class DataLayer {
             'consultation_time', 'done_time', 'postpone_time', 'created_at', 
             'updated_at', 'booked_time', 'noted_time', 'arrival_time', 
             'inconsult_time', 'investigation_time', 'consult_start_time',
-            'is_next', 'penalty_turns', 'edited_time', 'date_time',
+            'is_next', 'penalty_turns', 'waiting_turns', 'edited_time', 'date_time',
             'speciality', 'hospital', 'need_instruction', 'return_duration', 'return_unit',
             'next_appointment_date', 'follow_up_doctor', 'other_instruction',
             'transfer_hospital', 'selected_tests', 'linked_lab_ids',
@@ -911,6 +907,41 @@ class DataLayer {
         }
         
         TWOK_LOGGER.sync('[DataLayer] ✅ All data queued for sync. Watch SyncManager logs for progress.');
+    }
+
+    /**
+     * Clean up duplicate legacy fields from IndexedDB records.
+     * Run from console: await DataLayer.cleanupDuplicateFields()
+     */
+    async cleanupDuplicateFields() {
+        const tables = {
+            'appointments': ['arrivedTime', 'createdTime']
+        };
+
+        let totalCleaned = 0;
+        for (const [table, fields] of Object.entries(tables)) {
+            const records = await this.getAll(table);
+            let cleaned = 0;
+            for (const record of records) {
+                let modified = false;
+                for (const field of fields) {
+                    if (field in record) {
+                        delete record[field];
+                        modified = true;
+                    }
+                }
+                if (modified) {
+                    await this.put(table, record);
+                    cleaned++;
+                }
+            }
+            if (cleaned > 0) {
+                console.log(`[DataLayer] Cleaned ${cleaned}/${records.length} records in '${table}' (removed: ${fields.join(', ')})`);
+            }
+            totalCleaned += cleaned;
+        }
+        console.log(`[DataLayer] ✅ Cleanup complete: ${totalCleaned} records updated`);
+        return totalCleaned;
     }
 
     // ==========================================
@@ -1319,8 +1350,20 @@ class DataLayer {
                 if (recentData && recentData.length > 0) {
                     if (!silent) TWOK_LOGGER.sync(`[DataLayer] Found ${recentData.length} new/updated records for ${table}`);
                     
-                    const localData = recentData.map(record => this.mapFromDb(table, record));
-                    await this.bulkPut(table, localData);
+                    const syncManager = window.twokSyncManager || window.SyncManager;
+                    const localData = recentData
+                        .map(record => this.mapFromDb(table, record))
+                        .filter(record => {
+                            // Don't overwrite records with pending local changes
+                            if (syncManager && syncManager.isPending(table, record.id)) {
+                                if (!silent) TWOK_LOGGER.sync(`[DataLayer] 🛡️ Skipping ${table}:${record.id} (local change pending)`);
+                                return false;
+                            }
+                            return true;
+                        });
+                    if (localData.length > 0) {
+                        await this.bulkPut(table, localData);
+                    }
                 }
                 
                 // Update sync timestamp ONLY after successful fetch

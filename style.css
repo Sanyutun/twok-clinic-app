@@ -1616,6 +1616,17 @@ tbody tr.highlighted {
     background-color: #e5e7eb;
 }
 
+.action-btn-print {
+    background-color: #e0e7ff;
+    color: #4338ca;
+    padding: 8px 10px;
+    font-size: 0.85rem;
+}
+
+.action-btn-print:hover {
+    background-color: #c7d2fe;
+}
+
 /* Investigation Decision Dialog */
 .investigation-dialog {
     position: fixed;
@@ -2113,6 +2124,19 @@ tbody tr.highlighted {
     padding: 4px 10px;
     background-color: #fee2e2;
     color: #b91c1c;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 0.85rem;
+}
+
+/* Echo Waiting Badge */
+.waiting-badge-appointment {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 10px;
+    background-color: #fef3c7;
+    color: #92400e;
     border-radius: 12px;
     font-weight: 700;
     font-size: 0.85rem;
@@ -3882,4 +3906,78 @@ tbody tr.current-patient td {
     .filter-buttons {
         flex-wrap: wrap;
     }
+}
+
+/* ==================== BARCODE STYLES ==================== */
+.patient-barcode {
+    max-width: 100px;
+    height: auto;
+    display: block;
+}
+
+.barcode-display {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 15px;
+    background: #f9fafb;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+}
+
+.barcode-display svg {
+    max-width: 100%;
+    height: auto;
+}
+
+.barcode-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+.barcode-scan-result {
+    text-align: center;
+    font-size: 1rem;
+    color: var(--primary-color);
+    font-weight: 500;
+    margin-top: 15px;
+    min-height: 24px;
+}
+
+.barcode-scan-actions {
+    display: flex;
+    justify-content: center;
+    margin-top: 15px;
+}
+
+#barcodeScannerContainer {
+    min-height: 300px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+
+#barcodeScannerContainer video {
+    border-radius: var(--radius);
+}
+
+.scan-line {
+    position: absolute;
+    width: 80%;
+    height: 3px;
+    background: #ff3b30;
+    box-shadow: 0 0 12px rgba(255, 59, 48, 0.7), 0 0 24px rgba(255, 59, 48, 0.3);
+    border-radius: 2px;
+    z-index: 10;
+    animation: scanMove 2s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes scanMove {
+    0%, 100% { top: 20%; }
+    50% { top: 75%; }
 }

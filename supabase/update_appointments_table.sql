@@ -9,6 +9,7 @@ ALTER TABLE appointments
     ADD COLUMN IF NOT EXISTS consult_start_time TIMESTAMP WITH TIME ZONE,
     ADD COLUMN IF NOT EXISTS is_next BOOLEAN DEFAULT false,
     ADD COLUMN IF NOT EXISTS penalty_turns INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS waiting_turns INTEGER DEFAULT 0,
     ADD COLUMN IF NOT EXISTS edited_time TIMESTAMP WITH TIME ZONE;
 
 -- Add indexes for performance
