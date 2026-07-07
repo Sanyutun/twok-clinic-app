@@ -110,7 +110,10 @@ class ExpenseFormComponent {
 
                             <div class="form-group" style="position: relative;">
                                 <label>Patient Name</label>
-                                <input type="text" id="globalExpensePatientName" class="form-control" placeholder="Search patient..." autocomplete="off" tabindex="1" inputmode="text">
+                                <div style="display: flex; gap: 6px;">
+                                    <input type="text" id="globalExpensePatientName" class="form-control" placeholder="Search patient..." autocomplete="off" tabindex="1" inputmode="text" style="flex: 1;">
+                                    <button type="button" id="scanBarcodeExpenseBtn" class="btn btn-secondary" title="Scan patient barcode" style="padding: 8px 12px; white-space: nowrap;">📷 Scan</button>
+                                </div>
                                 <div id="globalExpensePatientAutocomplete" class="autocomplete-dropdown hidden"></div>
                                 <input type="hidden" id="globalExpensePatientIdHidden">
                             </div>

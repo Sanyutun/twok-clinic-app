@@ -2128,6 +2128,19 @@ function onBarcodeScanSuccess(decodedText) {
     } else if (scanContext === 'pharmacist') {
         renderPharmacistCorner(decodedText);
         switchSection('pharmacist');
+    } else if (scanContext === 'lab') {
+        filterLabTrackerByPatient(decodedText, patient.name);
+        switchSection('lab');
+    } else if (scanContext === 'instruction') {
+        elements.instructionSearchInput.value = patient.name;
+        instructionCurrentPage = 1;
+        renderInstructionTableWithSaved();
+        switchSection('instruction');
+    } else if (scanContext === 'expense') {
+        if (window.expenseForm && typeof window.expenseForm.selectExpensePatient === 'function') {
+            window.expenseForm.selectExpensePatient(patient.id);
+        }
+        switchSection('expense');
     } else {
         loadPatientToForm(patient.id);
         switchSection('patient');
@@ -3148,36 +3161,95 @@ function renderAppointmentTable(filteredAppointments = null) {
     elements.appointmentEmptyTableMessage.classList.add('hidden');
     elements.appointmentTable.classList.remove('hidden');
 
-    // Sort by: 1) Status 'In Consult', 2) isNext (Locked next patient), 3) Status priority, 4) Waiting turns, 5) Penalty, 6) Booking number
-    const sortedData = [...data].sort((a, b) => {
-        // Priority 1: Current consultation first
+    // Build sorted array by priority groups — DSCM first with zipper merge for Echo+Arrived
+    const dscmPts = data.filter(a => a.doctorName === TARGET_DOCTOR_NAME);
+    const otherPts = data.filter(a => a.doctorName !== TARGET_DOCTOR_NAME);
+
+    // --- DSCM priority groups ---
+    const sortByBookingNum = (arr) => arr.sort((a, b) => {
+        const aN = parseInt(a.bookingNumber, 10);
+        const bN = parseInt(b.bookingNumber, 10);
+        if (isNaN(aN) && isNaN(bN)) return 0;
+        if (isNaN(aN)) return 1;
+        if (isNaN(bN)) return -1;
+        return aN - bN;
+    });
+
+    const inConsult = dscmPts.filter(a => a.status === 'In Consult');
+    const nextLocked = dscmPts.filter(a => a.isNext && a.status !== 'In Consult');
+
+    const rest = dscmPts.filter(a => a.status !== 'In Consult' && !a.isNext);
+
+    const emergency = rest.filter(a => a.bookingType === 'Emergency');
+    const investigation = rest.filter(a => a.status === 'Investigation');
+
+    // Echo Urgent (no waiting) + Arrived (no penalty) — zipper merge
+    const echoReady = rest.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
+    const arrivedNoPenalty = rest.filter(a =>
+        a.status === 'Arrived' && (!a.penaltyTurns || a.penaltyTurns <= 0) && a.bookingType !== 'Echo Urgent'
+    );
+    sortByBookingNum(echoReady);
+    sortByBookingNum(arrivedNoPenalty);
+    const readyGroup = [];
+    {
+        let ei = 0, ai = 0;
+        while (ei < echoReady.length || ai < arrivedNoPenalty.length) {
+            if (ei < echoReady.length) readyGroup.push(echoReady[ei++]);
+            if (ai < arrivedNoPenalty.length) readyGroup.push(arrivedNoPenalty[ai++]);
+        }
+    }
+
+    const arrivedPenalty = rest.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0);
+    const notArrived = rest.filter(a => a.status === 'Booked' || a.status === 'Noted');
+    const cancelled = rest.filter(a => a.status === 'Cancelled');
+    const otherStatuses = rest.filter(a =>
+        !emergency.includes(a) && !investigation.includes(a) &&
+        !echoReady.includes(a) && !arrivedNoPenalty.includes(a) &&
+        !arrivedPenalty.includes(a) && !notArrived.includes(a) && !cancelled.includes(a)
+    );
+
+    sortByBookingNum(arrivedPenalty);
+    sortByBookingNum(notArrived);
+    sortByBookingNum(cancelled);
+    sortByBookingNum(otherStatuses);
+
+    const sortedDSCM = [
+        ...inConsult,
+        ...nextLocked,
+        ...emergency,
+        ...investigation,
+        ...readyGroup,
+        ...arrivedPenalty,
+        ...notArrived,
+        ...cancelled,
+        ...otherStatuses
+    ];
+
+    // --- Non-DSCM sort ---
+    const sortedOther = [...otherPts].sort((a, b) => {
         if (a.status === 'In Consult' && b.status !== 'In Consult') return -1;
         if (a.status !== 'In Consult' && b.status === 'In Consult') return 1;
-
-        // Priority 2: Locked Next Patient (isNext)
         if (a.isNext && !b.isNext) return -1;
         if (!a.isNext && b.isNext) return 1;
 
-        // Priority 3: Status priority (lower number = higher priority)
-        const aPriority = STATUS_PRIORITY[a.status] || 99;
-        const bPriority = STATUS_PRIORITY[b.status] || 99;
+        const aPrio = STATUS_PRIORITY[a.status] || 99;
+        const bPrio = STATUS_PRIORITY[b.status] || 99;
+        if (aPrio !== bPrio) return aPrio - bPrio;
 
-        if (aPriority !== bPriority) {
-            return aPriority - bPriority;
-        }
-
-        // Priority 4: Penalty (patients without penalty first)
         const aHasPenalty = a.penaltyTurns && a.penaltyTurns > 0;
         const bHasPenalty = b.penaltyTurns && b.penaltyTurns > 0;
-
         if (aHasPenalty && !bHasPenalty) return 1;
         if (!aHasPenalty && bHasPenalty) return -1;
 
-        // Priority 5: Booking number ascending
-        if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
-        if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
-        return parseInt(a.bookingNumber, 10) - parseInt(b.bookingNumber, 10);
+        const aNum = parseInt(a.bookingNumber, 10);
+        const bNum = parseInt(b.bookingNumber, 10);
+        if (isNaN(aNum) && isNaN(bNum)) return 0;
+        if (isNaN(aNum)) return 1;
+        if (isNaN(bNum)) return -1;
+        return aNum - bNum;
     });
+
+    const sortedData = [...sortedDSCM, ...sortedOther];
 
     // Pagination logic
     const totalItems = sortedData.length;
@@ -3897,58 +3969,70 @@ async function handleInvestigationNo() {
 }
 
 /**
- * Sort appointments for queue display with penalty and Echo Urgent logic
+ * Sort appointments for queue display with new priority order:
+ * 1. Currently consulting > 2. Next candidate (isNext) > 3. Emergency >
+ * 4. Investigated > 5. Echo Urgent (no waiting) + Arrived (no penalty) zipper-merged >
+ * 6. Arrived with penalty > 7. Not arrived (Booked, Noted) > 8. Cancelled
  */
 function sortAppointmentsForQueue(appts) {
-    return [...appts].sort((a, b) => {
-        // Priority 0: Status 'In Consult' always first
-        if (a.status === 'In Consult' && b.status !== 'In Consult') return -1;
-        if (a.status !== 'In Consult' && b.status === 'In Consult') return 1;
-
-        // Priority 1: Locked Next Patient (isNext)
-        if (a.isNext && !b.isNext) return -1;
-        if (!a.isNext && b.isNext) return 1;
-
-        // Custom Priority Logic requested by user:
-        // Emergency > Investigated patient > Echo Urgent (with 0 turns) > Normal queue patient without penalty > Queue patient with penalty
-        
-        const getCustomPriority = (appt) => {
-            if (appt.bookingType === 'Emergency') return 1;
-            if (appt.status === 'Investigation') return 2;
-            
-            // Echo Urgent logic: behaves like penalty turns — wait for turns to expire
-            if (appt.bookingType === 'Echo Urgent') {
-                return (appt.waitingTurns || 0) > 0 ? 6 : 3; // 6 if still waiting, 3 (ahead of normal) when ready
-            }
-            
-            // Normal patients
-            const hasPenalty = appt.penaltyTurns && appt.penaltyTurns > 0;
-            return hasPenalty ? 5 : 4; // 4: No penalty, 5: With penalty
-        };
-
-        const aCustom = getCustomPriority(a);
-        const bCustom = getCustomPriority(b);
-
-        if (aCustom !== bCustom) {
-            return aCustom - bCustom;
-        }
-
-        // Priority 2: Status priority (for remaining statuses like Arrived vs Booked)
-        const aStatusPrio = STATUS_PRIORITY[a.status] || 99;
-        const bStatusPrio = STATUS_PRIORITY[b.status] || 99;
-
-        if (aStatusPrio !== bStatusPrio) {
-            return aStatusPrio - bStatusPrio;
-        }
-
-        // Priority 3: Booking number in ascending order
-        if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
-        if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
-
-        const aNum = parseInt(a.bookingNumber, 10);
-        const bNum = parseInt(b.bookingNumber, 10);
-        return aNum - bNum;
+    const arr = [...appts];
+    const sortByBN = (arr) => arr.sort((a, b) => {
+        const aN = parseInt(a.bookingNumber, 10);
+        const bN = parseInt(b.bookingNumber, 10);
+        if (isNaN(aN) && isNaN(bN)) return 0;
+        if (isNaN(aN)) return 1;
+        if (isNaN(bN)) return -1;
+        return aN - bN;
     });
+
+    const inConsult = arr.filter(a => a.status === 'In Consult');
+    const nextLocked = arr.filter(a => a.isNext && a.status !== 'In Consult');
+    const rest = arr.filter(a => a.status !== 'In Consult' && !a.isNext);
+
+    const emergency = rest.filter(a => a.bookingType === 'Emergency');
+    const investigation = rest.filter(a => a.status === 'Investigation');
+
+    // Echo Urgent (no waiting) + Arrived (no penalty) — zipper merge
+    const echoReady = rest.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
+    const arrivedNoPenalty = rest.filter(a =>
+        a.status === 'Arrived' && (!a.penaltyTurns || a.penaltyTurns <= 0) && a.bookingType !== 'Echo Urgent'
+    );
+    sortByBN(echoReady);
+    sortByBN(arrivedNoPenalty);
+    const readyGroup = [];
+    {
+        let ei = 0, ai = 0;
+        while (ei < echoReady.length || ai < arrivedNoPenalty.length) {
+            if (ei < echoReady.length) readyGroup.push(echoReady[ei++]);
+            if (ai < arrivedNoPenalty.length) readyGroup.push(arrivedNoPenalty[ai++]);
+        }
+    }
+
+    const arrivedPenalty = rest.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0);
+    const notArrived = rest.filter(a => a.status === 'Booked' || a.status === 'Noted');
+    const cancelled = rest.filter(a => a.status === 'Cancelled');
+    const otherStatuses = rest.filter(a =>
+        !emergency.includes(a) && !investigation.includes(a) &&
+        !echoReady.includes(a) && !arrivedNoPenalty.includes(a) &&
+        !arrivedPenalty.includes(a) && !notArrived.includes(a) && !cancelled.includes(a)
+    );
+
+    sortByBN(arrivedPenalty);
+    sortByBN(notArrived);
+    sortByBN(cancelled);
+    sortByBN(otherStatuses);
+
+    return [
+        ...inConsult,
+        ...nextLocked,
+        ...emergency,
+        ...investigation,
+        ...readyGroup,
+        ...arrivedPenalty,
+        ...notArrived,
+        ...cancelled,
+        ...otherStatuses
+    ];
 }
 
 function sortAppointments(field) {
@@ -4202,7 +4286,8 @@ let lastInvestigatedPatientId = null; // Track patient who just went to investig
 
 /**
  * Build sorted candidate list for patient selection
- * Priority: 1) Locked Next Patient (isNext), 2) Investigation, 3) Arrived
+ * Priority: 1) Locked Next Patient (isNext), 2) Emergency, 3) Investigation,
+ * 4) Echo Urgent (ready) + Arrived (no penalty), 5) Arrived with penalty
  * Note: Excludes the patient who JUST went to investigation from current consult
  * @param {Array} todayAppointments - Today's appointments for target doctor
  */
@@ -4210,19 +4295,24 @@ function buildCandidateList(todayAppointments) {
     patientCandidates = [];
     currentCandidateIndex = 0;
 
-    // Filter eligible patients: Arrived or Investigation, and NOT the one just sent to investigation
+    // Filter eligible patients (arrived + emergency any status), exclude just investigated
     const eligible = todayAppointments.filter(a => 
-        ['Arrived', 'Investigation'].includes(a.status) && a.id !== lastInvestigatedPatientId
+        (['Arrived', 'Investigation'].includes(a.status) || a.bookingType === 'Emergency') && 
+        a.id !== lastInvestigatedPatientId
     );
 
-    // Sort using the standard rules (which prioritizes isNext)
+    // Sort using the standard rules (which now implements the full priority chain)
     const sorted = sortAppointmentsForQueue(eligible);
 
     // Map to candidate objects with appropriate categories
     sorted.forEach(p => {
         let category = 'arrived';
-        if (p.status === 'Investigation') {
+        if (p.bookingType === 'Emergency') {
+            category = 'emergency';
+        } else if (p.status === 'Investigation') {
             category = 'investigation';
+        } else if (p.bookingType === 'Echo Urgent') {
+            category = 'echo_urgent';
         } else if (p.penaltyTurns > 0) {
             category = 'penalty';
         }
@@ -4286,7 +4376,9 @@ function showCandidate(index) {
 
     // Update category badge
     elements.nextPatientCategory.textContent =
+        candidate.category === 'emergency' ? '🚨 Emergency' :
         candidate.category === 'investigation' ? '🔬 Investigation' :
+        candidate.category === 'echo_urgent' ? '⚡ Echo Urgent' :
         candidate.category === 'penalty' ? '⚠️ Penalty' : '🙋 Arrived';
     elements.nextPatientCategory.className = 'patient-card-badge ' + candidate.category;
 
@@ -6238,6 +6330,12 @@ function setupEventListeners() {
     document.getElementById('scanBarcodeBtn').addEventListener('click', () => openBarcodeScanner('patient'));
     document.getElementById('scanBarcodeApptBtn').addEventListener('click', () => openBarcodeScanner('appointment'));
     document.getElementById('scanBarcodePharmBtn').addEventListener('click', () => openBarcodeScanner('pharmacist'));
+    const scanBarcodeLabBtn = document.getElementById('scanBarcodeLabBtn');
+    if (scanBarcodeLabBtn) scanBarcodeLabBtn.addEventListener('click', () => openBarcodeScanner('lab'));
+    const scanBarcodeInstructionBtn = document.getElementById('scanBarcodeInstructionBtn');
+    if (scanBarcodeInstructionBtn) scanBarcodeInstructionBtn.addEventListener('click', () => openBarcodeScanner('instruction'));
+    const scanBarcodeExpenseBtn = document.getElementById('scanBarcodeExpenseBtn');
+    if (scanBarcodeExpenseBtn) scanBarcodeExpenseBtn.addEventListener('click', () => openBarcodeScanner('expense'));
     document.getElementById('closeBarcodeScanner').addEventListener('click', closeBarcodeScanner);
     document.getElementById('stopBarcodeScanner').addEventListener('click', closeBarcodeScanner);
     document.getElementById('barcodeScannerModal').addEventListener('click', (e) => {
@@ -8283,6 +8381,23 @@ function filterLabTracker() {
     }
 
     renderLabTracker(filtered);
+}
+
+/**
+ * Filter lab tracker by patient ID (called from barcode scan)
+ * @param {string} patientId - The scanned patient's ID
+ * @param {string} patientName - The scanned patient's name
+ */
+function filterLabTrackerByPatient(patientId, patientName) {
+    elements.labSearchInput.value = patientName;
+    labCurrentPage = 1;
+
+    let filtered = labRecords.filter(lab =>
+        lab.patientId === patientId || lab.patientName === patientName
+    );
+
+    renderLabTracker(filtered);
+    showNotification(`Showing ${filtered.length} lab record(s) for ${patientName}`, 'info');
 }
 
 // ==================== PHARMACIST CORNER ====================

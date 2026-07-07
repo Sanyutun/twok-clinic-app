@@ -1051,8 +1051,9 @@
             <!-- Filters -->
             <div class="toolbar">
                 <div class="search-container">
-                    <input type="text" id="instructionSearchInput" class="search-input" placeholder="Search by patient name..." autocomplete="off">
+                    <input type="text" id="instructionSearchInput" class="search-input" placeholder="Search by patient name..." autocomplete="off" style="padding-right: 45px;">
                     <span class="search-icon">🔍</span>
+                    <button type="button" id="scanBarcodeInstructionBtn" class="btn btn-secondary btn-sm" title="Scan patient barcode" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); padding: 4px 8px; line-height: 1; border: none; background: transparent; font-size: 1.1rem; cursor: pointer;">📷</button>
                 </div>
                 <select id="instructionDoctorFilter" class="form-control filter-input">
                     <option value="">All Doctors</option>
@@ -1725,6 +1726,9 @@
                 <option value="YN">YN</option>
                 <option value="BH">BH</option>
             </select>
+            <button type="button" id="scanBarcodeLabBtn" class="btn btn-secondary new-record-btn" title="Scan patient barcode to find lab records">
+                📷 Scan
+            </button>
             <button type="button" id="addLabTrackerBtn" class="btn btn-primary new-record-btn">
                 + Add Lab Tracker
             </button>
