@@ -836,27 +836,41 @@
 
         // Update Next Patient
         function updateNextPatient(appointments) {
-            const arrivedStatuses = ['Arrived', 'Investigation'];
-            const arrived = appointments
-                .filter(a => arrivedStatuses.includes(a.status))
-                .sort((a, b) => {
-                    const getPriority = (p) => {
-                        if (p.bookingType === 'Emergency') return 1;
-                        if (p.status === 'Investigation') return 2;
-                        if (p.bookingType === 'Echo Urgent') {
-                            return (p.waitingTurns || 0) > 0 ? 7 : 3;
-                        }
-                        return (p.penaltyTurns || 0) > 0 ? 6 : 4;
-                    };
-                    const aPrio = getPriority(a);
-                    const bPrio = getPriority(b);
-                    if (aPrio !== bPrio) return aPrio - bPrio;
+            const sortByBN = (arr) => arr.sort((a, b) => {
+                if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
+                if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
+                return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
+            });
 
-                    // Sort by booking number ascending
-                    if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
-                    if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
-                    return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
-                });
+            const arrivedStatuses = ['Arrived', 'Investigation'];
+            const eligible = appointments.filter(a => arrivedStatuses.includes(a.status));
+
+            const emergency = eligible.filter(a => a.bookingType === 'Emergency');
+            const investigation = eligible.filter(a => a.status === 'Investigation');
+
+            // Echo Urgent (no waiting) + Arrived (no penalty) — zipper merge
+            const echoReady = eligible.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
+            const arrivedNoPenalty = eligible.filter(a =>
+                a.status === 'Arrived' && (!a.penaltyTurns || a.penaltyTurns <= 0) && a.bookingType !== 'Echo Urgent'
+            );
+            sortByBN(echoReady);
+            sortByBN(arrivedNoPenalty);
+            const readyGroup = [];
+            {
+                let ei = 0, ai = 0;
+                while (ei < echoReady.length || ai < arrivedNoPenalty.length) {
+                    if (ei < echoReady.length) readyGroup.push(echoReady[ei++]);
+                    if (ai < arrivedNoPenalty.length) readyGroup.push(arrivedNoPenalty[ai++]);
+                }
+            }
+
+            const arrivedPenalty = eligible.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0);
+            sortByBN(arrivedPenalty);
+
+            const echoWaiting = eligible.filter(a => a.bookingType === 'Echo Urgent' && a.waitingTurns > 0);
+            sortByBN(echoWaiting);
+
+            const sortedArrived = [...emergency, ...investigation, ...readyGroup, ...arrivedPenalty, ...echoWaiting];
 
             const booked = appointments
                 .filter(a => a.status === 'Booked')
@@ -869,7 +883,7 @@
                     return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
                 });
 
-            const next = arrived.length > 0 ? arrived[0] : (booked.length > 0 ? booked[0] : null);
+            const next = sortedArrived.length > 0 ? sortedArrived[0] : (booked.length > 0 ? booked[0] : null);
 
             const content = document.getElementById('nextPatientContent');
             const numberEl = document.getElementById('nextPatientNumber');
@@ -917,29 +931,41 @@
 
         // Update Waiting Table (Screen B) - Creates multiple pages dynamically
         function updateWaitingTable(appointments) {
+            const sortByBN = (arr) => arr.sort((a, b) => {
+                if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
+                if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
+                return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
+            });
+
             const arrivedStatuses = ['Arrived', 'Investigation'];
+            const eligible = appointments.filter(a => arrivedStatuses.includes(a.status));
 
-            // Get all arrived patients sorted by booking number in ascending order
-            const arrived = appointments
-                .filter(a => arrivedStatuses.includes(a.status))
-                .sort((a, b) => {
-                    const getPriority = (p) => {
-                        if (p.bookingType === 'Emergency') return 1;
-                        if (p.status === 'Investigation') return 2;
-                        if (p.bookingType === 'Echo Urgent') {
-                            return (p.waitingTurns || 0) > 0 ? 7 : 3;
-                        }
-                        return (p.penaltyTurns || 0) > 0 ? 6 : 4;
-                    };
-                    const aPrio = getPriority(a);
-                    const bPrio = getPriority(b);
-                    if (aPrio !== bPrio) return aPrio - bPrio;
+            const emergency = eligible.filter(a => a.bookingType === 'Emergency');
+            const investigation = eligible.filter(a => a.status === 'Investigation');
 
-                    // Sort by booking number ascending
-                    if (a.bookingNumber === null || a.bookingNumber === undefined) return 1;
-                    if (b.bookingNumber === null || b.bookingNumber === undefined) return -1;
-                    return parseInt(a.bookingNumber) - parseInt(b.bookingNumber);
-                });
+            // Echo Urgent (no waiting) + Arrived (no penalty) — zipper merge
+            const echoReady = eligible.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
+            const arrivedNoPenalty = eligible.filter(a =>
+                a.status === 'Arrived' && (!a.penaltyTurns || a.penaltyTurns <= 0) && a.bookingType !== 'Echo Urgent'
+            );
+            sortByBN(echoReady);
+            sortByBN(arrivedNoPenalty);
+            const readyGroup = [];
+            {
+                let ei = 0, ai = 0;
+                while (ei < echoReady.length || ai < arrivedNoPenalty.length) {
+                    if (ei < echoReady.length) readyGroup.push(echoReady[ei++]);
+                    if (ai < arrivedNoPenalty.length) readyGroup.push(arrivedNoPenalty[ai++]);
+                }
+            }
+
+            const arrivedPenalty = eligible.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0);
+            sortByBN(arrivedPenalty);
+
+            const echoWaiting = eligible.filter(a => a.bookingType === 'Echo Urgent' && a.waitingTurns > 0);
+            sortByBN(echoWaiting);
+
+            const arrived = [...emergency, ...investigation, ...readyGroup, ...arrivedPenalty, ...echoWaiting];
 
             const screenBContainer = document.getElementById('screenB');
 

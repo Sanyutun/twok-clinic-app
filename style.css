@@ -479,6 +479,38 @@ textarea.form-control {
     transition: background-color 0.2s, border-color 0.2s;
 }
 
+/* Multi-phone entry */
+.phone-entry {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.phone-entry .patient-phone-input {
+    flex: 1;
+}
+
+.btn-remove-phone {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background: none;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--danger-color);
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.btn-remove-phone:hover {
+    background-color: #fef2f2;
+}
+
+.phone-copy-btn {
+    flex-shrink: 0;
+}
+
 .copy-btn:hover {
     background-color: #f9fafb;
     border-color: var(--primary-color);
@@ -607,6 +639,7 @@ textarea.form-control {
     border-radius: var(--radius-lg);
     padding: 25px;
     box-shadow: var(--shadow);
+    margin-bottom: 20px;
 }
 
 .table-header {
@@ -1317,80 +1350,147 @@ tbody tr.highlighted {
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
-/* Queue Summary */
+/* Queue Summary - Table Layout */
 .queue-summary {
-    display: flex;
-    gap: 15px;
     margin-bottom: 20px;
-    padding: 15px 20px;
-    background-color: #f9fafb;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    flex-wrap: wrap;
-}
-
-.queue-stat {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 10px 20px;
     background-color: var(--background-color);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius);
-    min-width: 100px;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
 }
 
-.queue-stat-label {
-    font-size: 0.75rem;
+.queue-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.queue-table-row {
+    display: grid;
+    grid-template-columns: 1.5fr 0.8fr 0.8fr 0.8fr;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.queue-table-row:last-child {
+    border-bottom: none;
+}
+
+.queue-table-header {
+    background-color: #f3f4f6;
+    font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
+    font-size: 0.72rem;
     letter-spacing: 0.5px;
-    margin-bottom: 5px;
 }
 
-.queue-stat-value {
-    font-size: 1.5rem;
+.queue-table-cell {
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.88rem;
+}
+
+.queue-table-doctor {
+    justify-content: flex-start;
+    font-weight: 600;
+    font-size: 0.9rem;
+    gap: 6px;
+}
+
+.queue-table-stat {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.queue-table-stat .queue-stat-value {
+    font-size: 1.1rem;
     font-weight: 600;
     color: var(--text-primary);
 }
 
-.queue-stat.next-patient {
-    background-color: rgba(37, 99, 235, 0.1);
-    border-color: var(--primary-color);
-    flex: 1;
-    min-width: 200px;
+.dscm-row {
+    background-color: rgba(37, 99, 235, 0.03);
 }
 
-.queue-stat.next-patient .queue-stat-value {
+.dscm-row .queue-table-doctor {
     color: var(--primary-color);
-    font-size: 1.1rem;
 }
 
-.queue-stat.current-consult {
-    background-color: rgba(34, 197, 94, 0.1);
-    border-color: #22c55e;
-    flex: 1;
-    min-width: 200px;
+.other-row .queue-table-doctor {
+    color: #6b7280;
 }
 
-.queue-stat.current-consult .queue-stat-value {
-    color: #22c55e;
-    font-size: 1.1rem;
+/* Queue Info Row - Next Patient, Now Serving, Button */
+.queue-info-row {
+    display: flex;
+    align-items: stretch;
+    border-top: 2px solid var(--border-color);
+    background-color: #f9fafb;
 }
 
-.queue-stat.queue-action {
+.queue-info-item {
     display: flex;
     align-items: center;
-    justify-content: center;
-    background-color: rgba(34, 197, 94, 0.1);
-    border-color: #22c55e;
-    padding: 10px 15px;
+    gap: 8px;
+    padding: 12px 16px;
 }
 
-.queue-stat.queue-action .btn {
-    font-size: 0.9rem;
+.queue-info-next {
+    flex: 2;
+    background-color: rgba(37, 99, 235, 0.06);
+    border-right: 1px solid var(--border-color);
+}
+
+.queue-info-consult {
+    flex: 2;
+    background-color: rgba(34, 197, 94, 0.06);
+    border-right: 1px solid var(--border-color);
+}
+
+.queue-info-action {
+    flex: 0 0 auto;
     padding: 8px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.queue-info-action .btn {
+    font-size: 0.85rem;
+    padding: 8px 20px;
     font-weight: 600;
+    white-space: nowrap;
+}
+
+.queue-info-label {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+.queue-info-value {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+.queue-info-next .queue-info-value {
+    color: var(--primary-color);
+}
+
+.queue-info-consult .queue-info-value {
+    color: #22c55e;
+}
+
+/* Remove old queue stat styles no longer needed */
+.queue-category-label {
+    display: none;
 }
 
 /* Autocomplete Wrapper */
@@ -2196,18 +2296,55 @@ tbody tr.current-patient td {
     }
 
     .queue-summary {
+        border-radius: var(--radius);
+    }
+
+    .queue-table-row {
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+        font-size: 0.82rem;
+    }
+
+    .queue-table-cell {
+        padding: 8px 10px;
+        font-size: 0.8rem;
+    }
+
+    .queue-table-doctor {
+        font-size: 0.8rem;
+    }
+
+    .queue-table-stat .queue-stat-value {
+        font-size: 0.95rem;
+    }
+
+    .queue-table-header .queue-table-cell {
+        font-size: 0.65rem;
+        padding: 6px 8px;
+    }
+
+    .queue-info-row {
         flex-wrap: wrap;
-        justify-content: center;
     }
 
-    .queue-stat {
-        min-width: 80px;
-        padding: 8px 15px;
+    .queue-info-next,
+    .queue-info-consult {
+        flex: 1 1 50%;
+        min-width: 0;
+        padding: 10px 12px;
     }
 
-    .queue-stat.next-patient {
-        width: 100%;
-        min-width: auto;
+    .queue-info-action {
+        flex: 1 1 100%;
+        padding: 8px 12px;
+        border-top: 1px solid var(--border-color);
+    }
+
+    .queue-info-label {
+        font-size: 0.6rem;
+    }
+
+    .queue-info-value {
+        font-size: 0.85rem;
     }
 
     .table-header {
@@ -2269,6 +2406,67 @@ tbody tr.current-patient td {
 
     .autocomplete-dropdown {
         right: 0;
+    }
+
+    /* Horizontal scroll for appointment table on mobile */
+    .table-wrapper {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    #appointmentTable, #otherAppointmentTable {
+        min-width: 1000px;
+    }
+
+    /* Long wait warning in card */
+    .long-wait-warning {
+        font-size: 0.75rem;
+        display: inline-block;
+        margin-left: 4px;
+    }
+
+    /* Queue number badge adjustments */
+    .queue-number-badge {
+        font-size: 0.85rem;
+        padding: 3px 10px;
+    }
+
+    /* Lab icons */
+    .lab-status-icons {
+        display: inline-flex;
+        margin-left: 6px;
+        gap: 3px;
+    }
+
+    .lab-status-icon {
+        width: 22px;
+        height: 22px;
+        font-size: 0.7rem;
+    }
+
+    /* Current patient highlight */
+    #appointmentTable tbody tr.current-patient,
+    #otherAppointmentTable tbody tr.current-patient {
+        border-color: #22c55e;
+        background-color: rgba(34, 197, 94, 0.05);
+    }
+
+    /* Pagination compact */
+    .pagination-container {
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .pagination-container .page-btn {
+        padding: 4px 10px;
+        font-size: 0.8rem;
+    }
+
+    /* Next patient stat overflow fix */
+    .queue-info-next .queue-info-value,
+    .queue-info-consult .queue-info-value {
+        font-size: 0.85rem;
+        word-break: break-word;
     }
 }
 

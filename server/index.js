@@ -28,6 +28,51 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // ==========================================
+// HELPERS
+// ==========================================
+function escapeHtml(text) {
+    if (!text) return '';
+    return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function normalizePhone(phone) {
+    return phone.replace(/[\s\-\(\)\+]/g, '');
+}
+
+function getPhoneVariants(phone) {
+    const digits = phone.replace(/\D/g, '');
+    const variants = [phone, digits];
+    if (digits.startsWith('95') && digits.length > 9) variants.push('0' + digits.slice(2));
+    if (digits.startsWith('09')) variants.push('+959' + digits.slice(2), '959' + digits.slice(2));
+    if (digits.length > 8) variants.push(digits.slice(-8));
+    if (digits.length > 9) variants.push(digits.slice(-9));
+    return [...new Set(variants)].filter(Boolean);
+}
+
+async function searchPatientsByPhone(supabase, phone) {
+    const variants = getPhoneVariants(phone);
+    const seen = new Set();
+    const results = [];
+    for (const v of variants) {
+        const { data, error } = await supabase
+            .from('patients')
+            .select('*')
+            .ilike('phone', `%${v}%`)
+            .order('name', { ascending: true });
+        if (error) throw error;
+        if (data) {
+            for (const p of data) {
+                if (!seen.has(p.id)) {
+                    seen.add(p.id);
+                    results.push(p);
+                }
+            }
+        }
+    }
+    return results;
+}
+
+// ==========================================
 // MIDDLEWARE
 // ==========================================
 app.use(cors({
@@ -207,6 +252,98 @@ app.delete('/api/patients/:id', async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+// --- PATIENT SEARCH (for incoming call integration) ---
+app.get('/api/patients/search', async (req, res) => {
+    try {
+        const { phone } = req.query;
+        if (!phone) {
+            return res.status(400).json({ error: 'Phone query parameter is required', success: false });
+        }
+        const cleanPhone = normalizePhone(phone.trim());
+        const patients = await searchPatientsByPhone(supabase, cleanPhone);
+        res.json({ success: true, count: patients.length, patients });
+    } catch (error) {
+        console.error('[Patient Search] Error:', error.message);
+        res.status(500).json({ error: error.message, success: false });
+    }
+});
+
+// --- INCOMING CALL PAGE (for Android Automate integration) ---
+app.get('/incoming-call', async (req, res) => {
+    try {
+        const { phone } = req.query;
+        if (!phone) {
+            return res.send(`<html><body style="font-family:sans-serif;padding:20px;text-align:center;background:#f3f4f6;"><h2>❌ Missing phone number</h2><p>Usage: /incoming-call?phone=09123456789</p></body></html>`);
+        }
+        const cleanPhone = normalizePhone(phone.trim());
+        const patients = await searchPatientsByPhone(supabase, cleanPhone);
+
+        const count = patients.length;
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+
+        let patientCards = '';
+        if (count === 0) {
+            patientCards = `<div style="text-align:center;padding:40px 20px;color:#6b7280;"><p style="font-size:1.2rem;">😕 No patients found with phone <strong>${escapeHtml(cleanPhone)}</strong></p></div>`;
+        } else {
+            patients.forEach(p => {
+                const phoneDisplay = p.phone || '-';
+                const ageDisplay = p.age || '-';
+                const sexDisplay = p.sex || '-';
+                patientCards += `
+                    <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+                        <div style="display:flex;justify-content:space-between;align-items:start;">
+                            <div>
+                                <h3 style="margin:0 0 4px;font-size:1.1rem;color:#111827;">${escapeHtml(p.name)}</h3>
+                                <p style="margin:2px 0;color:#6b7280;font-size:0.9rem;">🆔 ${escapeHtml(p.id)}</p>
+                            </div>
+                            <a href="${baseUrl}/?patientId=${encodeURIComponent(p.id)}&phone=${encodeURIComponent(cleanPhone)}" style="background:#2563eb;color:white;text-decoration:none;padding:8px 16px;border-radius:8px;font-size:0.85rem;white-space:nowrap;">👤 Open Patient</a>
+                        </div>
+                        <div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap;">
+                            <span style="font-size:0.85rem;color:#374151;">📞 ${escapeHtml(phoneDisplay)}</span>
+                            <span style="font-size:0.85rem;color:#374151;">🎂 ${escapeHtml(ageDisplay)}</span>
+                            <span style="font-size:0.85rem;color:#374151;">⚤ ${escapeHtml(sexDisplay)}</span>
+                            <span style="font-size:0.85rem;color:#374151;">📍 ${escapeHtml(p.address || '-')}</span>
+                        </div>
+                    </div>`;
+            });
+        }
+
+        res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Incoming Call - Patient Search</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; padding: 16px; color: #111827; }
+        .header { background: #2563eb; color: white; padding: 20px; border-radius: 12px; margin-bottom: 16px; text-align: center; }
+        .header h1 { font-size: 1.3rem; margin-bottom: 4px; }
+        .header p { font-size: 0.9rem; opacity: 0.9; }
+        .count-badge { display: inline-block; background: #dbeafe; color: #1e40af; padding: 4px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; margin-bottom: 12px; }
+        .footer { text-align: center; margin-top: 20px; padding: 16px; color: #9ca3af; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📞 Incoming Call</h1>
+        <p>Phone: <strong>${escapeHtml(cleanPhone)}</strong></p>
+    </div>
+    <div style="text-align:center;">
+        <span class="count-badge">${count} patient${count !== 1 ? 's' : ''} found</span>
+    </div>
+    ${patientCards}
+    <div class="footer">
+        <a href="${baseUrl}/" style="color:#2563eb;text-decoration:none;">← Open TWOK Clinic App</a>
+    </div>
+</body>
+</html>`);
+    } catch (error) {
+        console.error('[Incoming Call] Error:', error.message);
+        res.status(500).send(`<html><body style="font-family:sans-serif;padding:20px;text-align:center;background:#f3f4f6;"><h2>❌ Server Error</h2><p>${escapeHtml(error.message)}</p></body></html>`);
     }
 });
 

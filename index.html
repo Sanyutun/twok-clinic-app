@@ -471,22 +471,16 @@
 
                     <div class="form-row">
                         <div class="form-group full-width">
-                            <label for="patientPhone">Phone Number</label>
-                            <div class="phone-wrapper">
-                                <input
-                                    type="tel"
-                                    id="patientPhone"
-                                    class="form-control"
-                                    placeholder="Enter phone number"
-                                    pattern="[0-9]*"
-                                    tabindex="5"
-                                    inputmode="tel"
-                                >
-                                <button type="button" id="patientCopyPhoneBtn" class="copy-btn" title="Copy to clipboard">
-                                    📋
-                                </button>
-                                <span id="patientCopyTooltip" class="tooltip">Copied</span>
+                            <label>Phone Numbers</label>
+                            <div id="patientPhonesContainer">
+                                <div class="phone-entry">
+                                    <input type="tel" class="form-control patient-phone-input" placeholder="Enter phone number" pattern="[0-9]*" inputmode="tel">
+                                    <button type="button" class="copy-btn phone-copy-btn" title="Copy all numbers">📋</button>
+                                    <button type="button" class="btn-remove-phone" style="display:none;">✕</button>
+                                </div>
                             </div>
+                            <button type="button" id="addPhoneBtn" class="btn btn-sm btn-secondary" style="margin-top: 6px;">+ Add another phone</button>
+                            <span id="patientCopyTooltip" class="tooltip">Copied</span>
                         </div>
                     </div>
 
@@ -699,47 +693,53 @@
             <p>No appointment found. <a href="#" id="addNewAppointmentLink">Add a new appointment</a></p>
         </div>
 
-        <!-- Appointment Queue Summary -->
+        <!-- Merged Queue Summary -->
         <div class="queue-summary" id="queueSummary">
-            <div class="queue-stat">
-                <span class="queue-stat-label">Waiting</span>
-                <span class="queue-stat-value" id="waitingCount">0</span>
+            <div class="queue-table">
+                <div class="queue-table-row queue-table-header">
+                    <span class="queue-table-cell queue-table-doctor">Doctor</span>
+                    <span class="queue-table-cell queue-table-stat">Waiting</span>
+                    <span class="queue-table-cell queue-table-stat">In Consult</span>
+                    <span class="queue-table-cell queue-table-stat">Done</span>
+                </div>
+                <div class="queue-table-row dscm-row">
+                    <span class="queue-table-cell queue-table-doctor">👨‍⚕️ Dr. Soe Chan Myae</span>
+                    <span class="queue-table-cell queue-table-stat"><span class="queue-stat-value" id="waitingCount">0</span></span>
+                    <span class="queue-table-cell queue-table-stat"><span class="queue-stat-value" id="inConsultCount">0</span></span>
+                    <span class="queue-table-cell queue-table-stat"><span class="queue-stat-value" id="doneCount">0</span></span>
+                </div>
+                <div class="queue-table-row other-row">
+                    <span class="queue-table-cell queue-table-doctor">🏥 Other Patients</span>
+                    <span class="queue-table-cell queue-table-stat"><span class="queue-stat-value" id="otherWaitingCount">0</span></span>
+                    <span class="queue-table-cell queue-table-stat"><span class="queue-stat-value" id="otherInConsultCount">0</span></span>
+                    <span class="queue-table-cell queue-table-stat"><span class="queue-stat-value" id="otherDoneCount">0</span></span>
+                </div>
             </div>
-            <div class="queue-stat">
-                <span class="queue-stat-label">In Consult</span>
-                <span class="queue-stat-value" id="inConsultCount">0</span>
-            </div>
-            <div class="queue-stat">
-                <span class="queue-stat-label">Done</span>
-                <span class="queue-stat-value" id="doneCount">0</span>
-            </div>
-            <div class="queue-stat next-patient" id="nextPatientStat">
-                <span class="queue-stat-label">Next Patient</span>
-                <span class="queue-stat-value" id="nextPatientName">-</span>
-            </div>
-            <div class="queue-stat current-consult" id="currentConsultStat">
-                <span class="queue-stat-label">Now Serving</span>
-                <span class="queue-stat-value" id="currentConsultName">-</span>
-            </div>
-            <div class="queue-stat queue-action">
-                <button type="button" id="nextPatientBtn" class="btn btn-success btn-sm" title="Call Next Patient">
-                    📢 Next Patient
-                </button>
+            <div class="queue-info-row">
+                <span class="queue-info-item queue-info-next" id="nextPatientStat">
+                    <span class="queue-info-label">Next Patient</span>
+                    <span class="queue-info-value" id="nextPatientName">-</span>
+                </span>
+                <span class="queue-info-item queue-info-consult" id="currentConsultStat">
+                    <span class="queue-info-label">Now Serving</span>
+                    <span class="queue-info-value" id="currentConsultName">-</span>
+                </span>
+                <span class="queue-info-item queue-info-action">
+                    <button type="button" id="nextPatientBtn" class="btn btn-success btn-sm" title="Call Next Patient">📢 Next Patient</button>
+                    <button type="button" id="todayAppointmentsBtn" class="btn btn-secondary btn-sm" title="Show Today's Appointments" style="width: 100%;">📅 Today</button>
+                </span>
             </div>
         </div>
 
-        <!-- Appointment List Table -->
+        <!-- Dr. Soe Chan Myae Table -->
         <section class="table-section">
             <div class="table-header">
-                <h2>Appointments</h2>
+                <h2>👨‍⚕️ Dr. Soe Chan Myae</h2>
                 <div class="table-header-actions">
                     <button type="button" id="undoAppointmentBtn" class="btn btn-warning btn-sm" title="Undo Last Action (Ctrl+Z)" style="display: none; margin-right: 10px;">
                         ↩️ Undo
                     </button>
                     <span id="appointmentCount" class="record-count">0 appointments</span>
-                    <button type="button" id="todayAppointmentsBtn" class="btn btn-secondary btn-sm" title="Show Today's Appointments">
-                        📅 Today
-                    </button>
                 </div>
             </div>
             <div class="table-wrapper">
@@ -764,13 +764,49 @@
                     </tbody>
                 </table>
                 <div id="appointmentEmptyTableMessage" class="empty-message">
-                    <p>No appointments scheduled yet.</p>
+                    <p>No appointments for Dr. Soe Chan Myae.</p>
                     <button type="button" id="appointmentEmptyNewBtn" class="btn btn-primary">
                         + Schedule First Appointment
                     </button>
                 </div>
             </div>
             <div id="appointmentPagination" class="pagination-container"></div>
+        </section>
+
+        <!-- Other Doctors Table -->
+        <section class="table-section">
+            <div class="table-header">
+                <h2>🏥 Other Doctors</h2>
+                <div class="table-header-actions">
+                    <span id="otherAppointmentCount" class="record-count">0 appointments</span>
+                </div>
+            </div>
+            <div class="table-wrapper">
+                <table id="otherAppointmentTable">
+                    <thead>
+                        <tr>
+                            <th>Queue</th>
+                            <th>Patient</th>
+                            <th>Age</th>
+                            <th>Phone</th>
+                            <th>Doctor</th>
+                            <th>Time</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Arrival Time</th>
+                            <th>Penalty</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="otherAppointmentTableBody">
+                        <!-- Appointment rows will be inserted here -->
+                    </tbody>
+                </table>
+                <div id="otherAppointmentEmptyTableMessage" class="empty-message">
+                    <p>No appointments for other doctors.</p>
+                </div>
+            </div>
+            <div id="otherAppointmentPagination" class="pagination-container"></div>
         </section>
 
         <!-- Bottom Sheet Modal for Appointment Form -->
@@ -1051,9 +1087,9 @@
             <!-- Filters -->
             <div class="toolbar">
                 <div class="search-container">
-                    <input type="text" id="instructionSearchInput" class="search-input" placeholder="Search by patient name..." autocomplete="off" style="padding-right: 45px;">
+                    <input type="text" id="instructionSearchInput" class="search-input" placeholder="Search by patient name..." autocomplete="off" style="padding-right: 45px !important;">
                     <span class="search-icon">🔍</span>
-                    <button type="button" id="scanBarcodeInstructionBtn" class="btn btn-secondary btn-sm" title="Scan patient barcode" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); padding: 4px 8px; line-height: 1; border: none; background: transparent; font-size: 1.1rem; cursor: pointer;">📷</button>
+                    <button type="button" id="scanBarcodeInstructionBtn" class="btn btn-secondary btn-sm" title="Scan patient barcode" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); padding: 4px 8px; line-height: 1; border: none; background: transparent; font-size: 1.1rem; cursor: pointer; width: auto; min-width: 0;">📷</button>
                 </div>
                 <select id="instructionDoctorFilter" class="form-control filter-input">
                     <option value="">All Doctors</option>

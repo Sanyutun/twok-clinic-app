@@ -271,8 +271,7 @@ const elements = {
     patientAddress: document.getElementById('patientAddress'),
     addressList: document.getElementById('addressList'),
     manageAddressBtn: document.getElementById('manageAddressBtn'),
-    patientPhone: document.getElementById('patientPhone'),
-    patientCopyPhoneBtn: document.getElementById('patientCopyPhoneBtn'),
+    patientPhonesContainer: document.getElementById('patientPhonesContainer'),
     patientCopyTooltip: document.getElementById('patientCopyTooltip'),
     patientNote: document.getElementById('patientNote'),
     patientIsFoc: document.getElementById('patientIsFoc'),
@@ -344,6 +343,11 @@ const elements = {
     appointmentTable: document.getElementById('appointmentTable'),
     appointmentTableBody: document.getElementById('appointmentTableBody'),
     appointmentEmptyTableMessage: document.getElementById('appointmentEmptyTableMessage'),
+    otherAppointmentCount: document.getElementById('otherAppointmentCount'),
+    otherAppointmentTable: document.getElementById('otherAppointmentTable'),
+    otherAppointmentTableBody: document.getElementById('otherAppointmentTableBody'),
+    otherAppointmentEmptyTableMessage: document.getElementById('otherAppointmentEmptyTableMessage'),
+    otherAppointmentPagination: document.getElementById('otherAppointmentPagination'),
     appointmentEmptyNewBtn: document.getElementById('appointmentEmptyNewBtn'),
     appointmentFormModal: document.getElementById('appointmentFormModal'),
     closeAppointmentFormModal: document.getElementById('closeAppointmentFormModal'),
@@ -609,6 +613,7 @@ const ITEMS_PER_PAGE = 25; // Optimized for performance
 let patientCurrentPage = 1;
 let doctorCurrentPage = 1;
 let appointmentCurrentPage = 1;
+let appointmentOtherCurrentPage = 1;
 let instructionCurrentPage = 1;
 let labCurrentPage = 1;
 
@@ -661,6 +666,12 @@ function changeAppointmentPage(page) {
     elements.appointmentSection.scrollIntoView({ behavior: 'smooth' });
 }
 
+function changeOtherAppointmentPage(page) {
+    appointmentOtherCurrentPage = page;
+    renderAppointmentTable();
+    elements.appointmentSection.scrollIntoView({ behavior: 'smooth' });
+}
+
 function changeInstructionPage(page) {
     instructionCurrentPage = page;
     renderInstructionTableWithSaved();
@@ -677,6 +688,7 @@ function changeLabPage(page) {
 window.changePatientPage = changePatientPage;
 window.changeDoctorPage = changeDoctorPage;
 window.changeAppointmentPage = changeAppointmentPage;
+window.changeOtherAppointmentPage = changeOtherAppointmentPage;
 window.changeInstructionPage = changeInstructionPage;
 window.changeLabPage = changeLabPage;
 
@@ -995,6 +1007,24 @@ async function init() {
 
     // Initialize WebSocket for TV display
     initWebSocket();
+
+    // Handle URL query params (from incoming-call page or external links)
+    const params = new URLSearchParams(window.location.search);
+    const patientIdParam = params.get('patientId');
+    const phoneParam = params.get('phone');
+    if (patientIdParam) {
+        const patient = patients.find(p => p.id === patientIdParam);
+        if (patient) {
+            loadPatientToForm(patient.id);
+            openPatientFormModal();
+        } else {
+            showNotification('Patient not found: ' + patientIdParam, 'warning');
+        }
+    } else if (phoneParam) {
+        switchSection('patient');
+        elements.patientSearchInput.value = phoneParam;
+        searchPatients(phoneParam);
+    }
 
     // Sync button
     const syncBtn = document.getElementById('syncBtn');
@@ -2058,6 +2088,7 @@ let html5QrCode = null;
 let scanContext = 'patient';
 
 function openBarcodeScanner(context) {
+    closeBarcodeScanner();
     scanContext = context || 'patient';
     const modal = document.getElementById('barcodeScannerModal');
     const container = document.getElementById('barcodeScannerContainer');
@@ -2129,8 +2160,8 @@ function onBarcodeScanSuccess(decodedText) {
         renderPharmacistCorner(decodedText);
         switchSection('pharmacist');
     } else if (scanContext === 'lab') {
-        filterLabTrackerByPatient(decodedText, patient.name);
         switchSection('lab');
+        filterLabTrackerByPatient(decodedText, patient.name);
     } else if (scanContext === 'instruction') {
         elements.instructionSearchInput.value = patient.name;
         instructionCurrentPage = 1;
@@ -2151,8 +2182,18 @@ function onBarcodeScanFailure(err) {}
 
 function closeBarcodeScanner() {
     if (html5QrCode) {
-        try { html5QrCode.stop(); } catch (e) {}
+        try { html5QrCode.stop().catch(() => {}); } catch (e) {}
         html5QrCode = null;
+    }
+    const container = document.getElementById('barcodeScannerContainer');
+    if (container) {
+        container.querySelectorAll('video').forEach(v => {
+            if (v.srcObject) {
+                v.srcObject.getTracks().forEach(t => t.stop());
+                v.srcObject = null;
+            }
+        });
+        container.innerHTML = '<div class="scan-line"></div>';
     }
     document.getElementById('barcodeScannerModal').classList.add('hidden');
 }
@@ -2272,6 +2313,52 @@ function searchPatients(searchTerm) {
     elements.patientNoResultsMessage.classList.toggle('hidden', filtered.length > 0);
 }
 
+function getPhoneValues() {
+    const inputs = elements.patientPhonesContainer.querySelectorAll('.patient-phone-input');
+    return Array.from(inputs).map(inp => inp.value.trim()).filter(Boolean);
+}
+
+function setPhoneValues(phones) {
+    const container = elements.patientPhonesContainer;
+    container.innerHTML = '';
+    if (!phones || phones.length === 0) phones = [''];
+    phones.forEach((phone, i) => {
+        const entry = document.createElement('div');
+        entry.className = 'phone-entry';
+        entry.innerHTML = `<input type="tel" class="form-control patient-phone-input" placeholder="Enter phone number" pattern="[0-9]*" inputmode="tel" value="${escapeHtml(phone)}">
+            <button type="button" class="copy-btn phone-copy-btn" title="Copy all numbers">📋</button>
+            <button type="button" class="btn-remove-phone">✕</button>`;
+        const removeBtn = entry.querySelector('.btn-remove-phone');
+        removeBtn.addEventListener('click', () => {
+            entry.remove();
+            updateRemoveButtons();
+        });
+        const copyBtn = entry.querySelector('.phone-copy-btn');
+        copyBtn.addEventListener('click', () => copyPatientPhone());
+        container.appendChild(entry);
+    });
+    updateRemoveButtons();
+}
+
+function updateRemoveButtons() {
+    const entries = elements.patientPhonesContainer.querySelectorAll('.phone-entry');
+    entries.forEach((entry, i) => {
+        const btn = entry.querySelector('.btn-remove-phone');
+        btn.style.display = entries.length > 1 ? '' : 'none';
+    });
+}
+
+function copyPatientPhone() {
+    const phones = getPhoneValues();
+    if (phones.length === 0) return;
+    const text = phones.join(', ');
+    navigator.clipboard.writeText(text).then(() => {
+        const tooltip = elements.patientCopyTooltip;
+        tooltip.classList.add('show');
+        setTimeout(() => tooltip.classList.remove('show'), 1500);
+    });
+}
+
 function loadPatientToForm(patientId) {
     const index = patients.findIndex(p => p.id === patientId);
     if (index === -1) return;
@@ -2282,7 +2369,7 @@ function loadPatientToForm(patientId) {
     elements.patientAge.value = p.age;
     elements.patientSex.value = p.sex;
     elements.patientAddress.value = p.address;
-    elements.patientPhone.value = p.phone;
+    setPhoneValues((p.phone || '').split(',').map(s => s.trim()).filter(Boolean));
     elements.patientNote.value = p.note;
     elements.patientIsFoc.checked = p.isFoc || false;
     patientIsEditing = true;
@@ -2402,7 +2489,7 @@ function savePatient(e) {
         age: elements.patientAge.value.trim(),
         sex: elements.patientSex.value,
         address: elements.patientAddress.value.trim(),
-        phone: elements.patientPhone.value.trim(),
+        phone: getPhoneValues().join(', '),
         note: elements.patientNote.value.trim(),
         isFoc: elements.patientIsFoc.checked
     };
@@ -2529,6 +2616,7 @@ async function deletePatient(event, patientId) {
 
 function resetPatientForm() {
     elements.patientForm.reset();
+    setPhoneValues(['']);
     elements.patientEditIndex.value = '';
     patientIsEditing = false;
     elements.patientFormTitle.textContent = 'Register New Patient';
@@ -2870,23 +2958,6 @@ function deleteHospital(event, index) {
 }
 
 // ==================== CLIPBOARD ====================
-async function copyPatientPhone() {
-    const phone = elements.patientPhone.value.trim();
-    if (!phone) { showNotification('No phone number to copy', 'error'); return; }
-    try {
-        await navigator.clipboard.writeText(phone);
-        showPatientTooltip();
-    } catch {
-        const ta = document.createElement('textarea');
-        ta.value = phone;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        showPatientTooltip();
-    }
-}
-
 function showPatientTooltip() {
     elements.patientCopyTooltip.classList.add('show');
     setTimeout(() => elements.patientCopyTooltip.classList.remove('show'), 1500);
@@ -3131,154 +3202,149 @@ function renderAppointmentTable(filteredAppointments = null) {
     if (filteredAppointments !== null) {
         data = filteredAppointments;
     } else {
-        // Apply date and doctor filters if they are set
         const dateFilter = elements.appointmentDateFilter.value;
         const doctorFilter = elements.appointmentDoctorFilter.value;
 
         data = appointments;
 
-        // Filter by date if set
         if (dateFilter) {
             data = data.filter(a => a.appointmentTime && a.appointmentTime.startsWith(dateFilter));
         }
 
-        // Filter by doctor if set
         if (doctorFilter) {
             data = data.filter(a => a.doctorName === doctorFilter);
         }
     }
 
-    elements.appointmentCount.textContent = `${data.length} appointment${data.length !== 1 ? 's' : ''}`;
+    const dscmData = data.filter(a => a.doctorName === TARGET_DOCTOR_NAME);
+    const otherData = data.filter(a => a.doctorName !== TARGET_DOCTOR_NAME);
+
+    const dscmPages = Math.ceil(dscmData.length / ITEMS_PER_PAGE) || 1;
+    if (appointmentCurrentPage > dscmPages) appointmentCurrentPage = dscmPages;
+    if (appointmentCurrentPage < 1) appointmentCurrentPage = 1;
+
+    const otherPages = Math.ceil(otherData.length / ITEMS_PER_PAGE) || 1;
+    if (appointmentOtherCurrentPage > otherPages) appointmentOtherCurrentPage = otherPages;
+    if (appointmentOtherCurrentPage < 1) appointmentOtherCurrentPage = 1;
+
+    renderSingleAppointmentTable(dscmData, elements.appointmentTableBody, elements.appointmentTable, elements.appointmentEmptyTableMessage, elements.appointmentPagination, elements.appointmentCount, appointmentCurrentPage, 'changeAppointmentPage', true);
+    renderSingleAppointmentTable(otherData, elements.otherAppointmentTableBody, elements.otherAppointmentTable, elements.otherAppointmentEmptyTableMessage, elements.otherAppointmentPagination, elements.otherAppointmentCount, appointmentOtherCurrentPage, 'changeOtherAppointmentPage', false);
+}
+
+function renderSingleAppointmentTable(data, tableBodyEl, tableEl, emptyMsgEl, paginationEl, countEl, currentPage, pageChangeFunc, isDscm) {
+    countEl.textContent = `${data.length} appointment${data.length !== 1 ? 's' : ''}`;
 
     if (data.length === 0) {
-        elements.appointmentTableBody.innerHTML = '';
-        elements.appointmentEmptyTableMessage.classList.remove('hidden');
-        elements.appointmentTable.classList.add('hidden');
-        if (elements.appointmentPagination) elements.appointmentPagination.innerHTML = '';
+        tableBodyEl.innerHTML = '';
+        emptyMsgEl.classList.remove('hidden');
+        tableEl.classList.add('hidden');
+        if (paginationEl) paginationEl.innerHTML = '';
         return;
     }
 
-    elements.appointmentEmptyTableMessage.classList.add('hidden');
-    elements.appointmentTable.classList.remove('hidden');
+    emptyMsgEl.classList.add('hidden');
+    tableEl.classList.remove('hidden');
 
-    // Build sorted array by priority groups — DSCM first with zipper merge for Echo+Arrived
-    const dscmPts = data.filter(a => a.doctorName === TARGET_DOCTOR_NAME);
-    const otherPts = data.filter(a => a.doctorName !== TARGET_DOCTOR_NAME);
+    // --- Sorting ---
+    let sortedData;
+    if (isDscm) {
+        const sortByBookingNum = (arr) => arr.sort((a, b) => {
+            const aN = parseInt(a.bookingNumber, 10);
+            const bN = parseInt(b.bookingNumber, 10);
+            if (isNaN(aN) && isNaN(bN)) return 0;
+            if (isNaN(aN)) return 1;
+            if (isNaN(bN)) return -1;
+            return aN - bN;
+        });
 
-    // --- DSCM priority groups ---
-    const sortByBookingNum = (arr) => arr.sort((a, b) => {
-        const aN = parseInt(a.bookingNumber, 10);
-        const bN = parseInt(b.bookingNumber, 10);
-        if (isNaN(aN) && isNaN(bN)) return 0;
-        if (isNaN(aN)) return 1;
-        if (isNaN(bN)) return -1;
-        return aN - bN;
-    });
-
-    const inConsult = dscmPts.filter(a => a.status === 'In Consult');
-    const nextLocked = dscmPts.filter(a => a.isNext && a.status !== 'In Consult');
-
-    const rest = dscmPts.filter(a => a.status !== 'In Consult' && !a.isNext);
-
-    const emergency = rest.filter(a => a.bookingType === 'Emergency');
-    const investigation = rest.filter(a => a.status === 'Investigation');
-
-    // Echo Urgent (no waiting) + Arrived (no penalty) — zipper merge
-    const echoReady = rest.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
-    const arrivedNoPenalty = rest.filter(a =>
-        a.status === 'Arrived' && (!a.penaltyTurns || a.penaltyTurns <= 0) && a.bookingType !== 'Echo Urgent'
-    );
-    sortByBookingNum(echoReady);
-    sortByBookingNum(arrivedNoPenalty);
-    const readyGroup = [];
-    {
-        let ei = 0, ai = 0;
-        while (ei < echoReady.length || ai < arrivedNoPenalty.length) {
-            if (ei < echoReady.length) readyGroup.push(echoReady[ei++]);
-            if (ai < arrivedNoPenalty.length) readyGroup.push(arrivedNoPenalty[ai++]);
+        const inConsult = data.filter(a => a.status === 'In Consult');
+        const nextLocked = data.filter(a => a.isNext && a.status !== 'In Consult');
+        const rest = data.filter(a => a.status !== 'In Consult' && !a.isNext);
+        const emergency = rest.filter(a => a.bookingType === 'Emergency');
+        const investigation = rest.filter(a => a.status === 'Investigation');
+        const echoReady = rest.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
+        const arrivedNoPenalty = rest.filter(a =>
+            a.status === 'Arrived' && (!a.penaltyTurns || a.penaltyTurns <= 0) && a.bookingType !== 'Echo Urgent'
+        );
+        sortByBookingNum(echoReady);
+        sortByBookingNum(arrivedNoPenalty);
+        const readyGroup = [];
+        {
+            let ei = 0, ai = 0;
+            while (ei < echoReady.length || ai < arrivedNoPenalty.length) {
+                if (ei < echoReady.length) readyGroup.push(echoReady[ei++]);
+                if (ai < arrivedNoPenalty.length) readyGroup.push(arrivedNoPenalty[ai++]);
+            }
         }
+        const arrivedPenalty = rest.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0);
+        const echoWaiting = rest.filter(a => a.bookingType === 'Echo Urgent' && a.waitingTurns > 0);
+        const notArrived = rest.filter(a => a.status === 'Booked' || a.status === 'Noted');
+        const cancelledPostponed = rest.filter(a => a.status === 'Cancelled' || a.status === 'Postpone');
+        const otherStatuses = rest.filter(a =>
+            !emergency.includes(a) && !investigation.includes(a) &&
+            !echoReady.includes(a) && !arrivedNoPenalty.includes(a) &&
+            !arrivedPenalty.includes(a) && !echoWaiting.includes(a) &&
+            !notArrived.includes(a) && !cancelledPostponed.includes(a)
+        );
+        sortByBookingNum(arrivedPenalty);
+        sortByBookingNum(echoWaiting);
+        sortByBookingNum(notArrived);
+        sortByBookingNum(cancelledPostponed);
+        sortByBookingNum(otherStatuses);
+
+        sortedData = [
+            ...inConsult, ...emergency, ...nextLocked, ...investigation,
+            ...readyGroup, ...arrivedPenalty, ...echoWaiting,
+            ...notArrived, ...cancelledPostponed, ...otherStatuses
+        ];
+    } else {
+        sortedData = [...data].sort((a, b) => {
+            if (a.status === 'In Consult' && b.status !== 'In Consult') return -1;
+            if (a.status !== 'In Consult' && b.status === 'In Consult') return 1;
+            if (a.isNext && !b.isNext) return -1;
+            if (!a.isNext && b.isNext) return 1;
+
+            const aPrio = STATUS_PRIORITY[a.status] || 99;
+            const bPrio = STATUS_PRIORITY[b.status] || 99;
+            if (aPrio !== bPrio) return aPrio - bPrio;
+
+            const aHasPenalty = a.penaltyTurns && a.penaltyTurns > 0;
+            const bHasPenalty = b.penaltyTurns && b.penaltyTurns > 0;
+            if (aHasPenalty && !bHasPenalty) return 1;
+            if (!aHasPenalty && bHasPenalty) return -1;
+
+            const aNum = parseInt(a.bookingNumber, 10);
+            const bNum = parseInt(b.bookingNumber, 10);
+            if (isNaN(aNum) && isNaN(bNum)) return 0;
+            if (isNaN(aNum)) return 1;
+            if (isNaN(bNum)) return -1;
+            return aNum - bNum;
+        });
     }
 
-    const arrivedPenalty = rest.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0);
-    const notArrived = rest.filter(a => a.status === 'Booked' || a.status === 'Noted');
-    const cancelled = rest.filter(a => a.status === 'Cancelled');
-    const otherStatuses = rest.filter(a =>
-        !emergency.includes(a) && !investigation.includes(a) &&
-        !echoReady.includes(a) && !arrivedNoPenalty.includes(a) &&
-        !arrivedPenalty.includes(a) && !notArrived.includes(a) && !cancelled.includes(a)
-    );
-
-    sortByBookingNum(arrivedPenalty);
-    sortByBookingNum(notArrived);
-    sortByBookingNum(cancelled);
-    sortByBookingNum(otherStatuses);
-
-    const sortedDSCM = [
-        ...inConsult,
-        ...nextLocked,
-        ...emergency,
-        ...investigation,
-        ...readyGroup,
-        ...arrivedPenalty,
-        ...notArrived,
-        ...cancelled,
-        ...otherStatuses
-    ];
-
-    // --- Non-DSCM sort ---
-    const sortedOther = [...otherPts].sort((a, b) => {
-        if (a.status === 'In Consult' && b.status !== 'In Consult') return -1;
-        if (a.status !== 'In Consult' && b.status === 'In Consult') return 1;
-        if (a.isNext && !b.isNext) return -1;
-        if (!a.isNext && b.isNext) return 1;
-
-        const aPrio = STATUS_PRIORITY[a.status] || 99;
-        const bPrio = STATUS_PRIORITY[b.status] || 99;
-        if (aPrio !== bPrio) return aPrio - bPrio;
-
-        const aHasPenalty = a.penaltyTurns && a.penaltyTurns > 0;
-        const bHasPenalty = b.penaltyTurns && b.penaltyTurns > 0;
-        if (aHasPenalty && !bHasPenalty) return 1;
-        if (!aHasPenalty && bHasPenalty) return -1;
-
-        const aNum = parseInt(a.bookingNumber, 10);
-        const bNum = parseInt(b.bookingNumber, 10);
-        if (isNaN(aNum) && isNaN(bNum)) return 0;
-        if (isNaN(aNum)) return 1;
-        if (isNaN(bNum)) return -1;
-        return aNum - bNum;
-    });
-
-    const sortedData = [...sortedDSCM, ...sortedOther];
-
-    // Pagination logic
+    // --- Pagination ---
     const totalItems = sortedData.length;
     const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
 
-    // Ensure current page is within bounds
-    if (appointmentCurrentPage > totalPages && totalPages > 0) {
-        appointmentCurrentPage = totalPages;
-    } else if (appointmentCurrentPage < 1) {
-        appointmentCurrentPage = 1;
+    if (currentPage > totalPages && totalPages > 0) {
+        currentPage = totalPages;
+    } else if (currentPage < 1) {
+        currentPage = 1;
     }
 
-    const startIndex = (appointmentCurrentPage - 1) * ITEMS_PER_PAGE;
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     const paginatedData = sortedData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
 
-    // OPTIMIZATION: Pre-calculate lab status map for current page to avoid O(N*M) lookup in map()
+    // --- Pre-calculate lab status map ---
     const patientLabMap = new Map();
     if (paginatedData.length > 0) {
         const patientIds = new Set(paginatedData.map(a => String(a.patientId)).filter(id => id && id !== 'undefined'));
         const patientNames = new Set(paginatedData.map(a => a.patientName ? a.patientName.toLowerCase().trim() : '').filter(name => name));
-        
         const statusesToShow = ['Complete Result Out', 'Partial Result Out', 'Inform to Doctor', 'Inform to Patient'];
-        
         labRecords.forEach(lab => {
             if (!statusesToShow.includes(lab.status)) return;
-            
             const labPatientId = lab.patientId ? String(lab.patientId) : null;
             const labPatientName = lab.patientName ? lab.patientName.toLowerCase().trim() : '';
-            
             if ((labPatientId && patientIds.has(labPatientId)) || (labPatientName && patientNames.has(labPatientName))) {
                 const key = labPatientId || labPatientName;
                 if (!patientLabMap.has(key)) patientLabMap.set(key, []);
@@ -3287,7 +3353,8 @@ function renderAppointmentTable(filteredAppointments = null) {
         });
     }
 
-    elements.appointmentTableBody.innerHTML = paginatedData.map(appt => {
+    // --- Render rows ---
+    tableBodyEl.innerHTML = paginatedData.map(appt => {
         const statusClass = getStatusClass(appt.status);
         const typeClass = getBookingTypeClass(appt.bookingType);
         const queueClass = getQueueNumberClass(appt.bookingType, appt.bookingNumber);
@@ -3295,7 +3362,6 @@ function renderAppointmentTable(filteredAppointments = null) {
         const timeDisplay = appt.appointmentTime ? new Date(appt.appointmentTime).toLocaleString() : '-';
         const arrivalTimeDisplay = appt.arrivalTime ? formatDateTime(appt.arrivalTime) : '-';
 
-        // Check for long wait (more than 2 hours)
         let longWaitWarning = '';
         let longWaitClass = '';
         if (appt.arrivalTime && (appt.status === 'Arrived' || appt.status === 'Investigation' || appt.status === 'Echo Urgent')) {
@@ -3308,7 +3374,6 @@ function renderAppointmentTable(filteredAppointments = null) {
             }
         }
 
-        // Get action button config
         const actionConfig = ACTION_BUTTON_MAP[appt.status] || ACTION_BUTTON_MAP['Noted'];
         const isCurrentlyConsulting = appt.status === 'In Consult';
         const rowClass = isCurrentlyConsulting ? 'current-patient' : '';
@@ -3321,7 +3386,6 @@ function renderAppointmentTable(filteredAppointments = null) {
         }
         const printBtnHtml = `<button type="button" class="action-btn action-btn-print" onclick="printAppointmentBarcode(event, '${appt.id}')" title="Print barcode sticker">🖨️</button>`;
 
-        // Optimized lab icons using pre-calculated map
         const apptPatientId = appt.patientId ? String(appt.patientId) : null;
         const apptPatientName = appt.patientName ? appt.patientName.toLowerCase().trim() : '';
         const patientLabs = (apptPatientId && patientLabMap.get(apptPatientId)) || (apptPatientName && patientLabMap.get(apptPatientName)) || [];
@@ -3352,7 +3416,7 @@ function renderAppointmentTable(filteredAppointments = null) {
         `;
     }).join('');
 
-    elements.appointmentTableBody.querySelectorAll('tr').forEach(row => {
+    tableBodyEl.querySelectorAll('tr').forEach(row => {
         row.addEventListener('click', (e) => {
             if (!e.target.closest('.action-buttons') && !e.target.closest('.action-btn')) {
                 loadAppointmentToForm(row.dataset.id);
@@ -3360,7 +3424,7 @@ function renderAppointmentTable(filteredAppointments = null) {
         });
     });
 
-    renderPagination(elements.appointmentPagination, totalItems, appointmentCurrentPage, 'changeAppointmentPage');
+    renderPagination(paginationEl, totalItems, currentPage, pageChangeFunc);
 }
 
 // ==================== APPOINTMENT WORKFLOW ACTIONS ====================
@@ -3992,7 +4056,7 @@ function sortAppointmentsForQueue(appts) {
     const emergency = rest.filter(a => a.bookingType === 'Emergency');
     const investigation = rest.filter(a => a.status === 'Investigation');
 
-    // Echo Urgent (no waiting) + Arrived (no penalty) — zipper merge
+    // Echo Urgent (ready) + Arrived (no penalty) — zipper merge
     const echoReady = rest.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
     const arrivedNoPenalty = rest.filter(a =>
         a.status === 'Arrived' && (!a.penaltyTurns || a.penaltyTurns <= 0) && a.bookingType !== 'Echo Urgent'
@@ -4009,28 +4073,32 @@ function sortAppointmentsForQueue(appts) {
     }
 
     const arrivedPenalty = rest.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0);
+    const echoWaiting = rest.filter(a => a.bookingType === 'Echo Urgent' && a.waitingTurns > 0);
     const notArrived = rest.filter(a => a.status === 'Booked' || a.status === 'Noted');
-    const cancelled = rest.filter(a => a.status === 'Cancelled');
+    const cancelledPostponed = rest.filter(a => a.status === 'Cancelled' || a.status === 'Postpone');
     const otherStatuses = rest.filter(a =>
         !emergency.includes(a) && !investigation.includes(a) &&
         !echoReady.includes(a) && !arrivedNoPenalty.includes(a) &&
-        !arrivedPenalty.includes(a) && !notArrived.includes(a) && !cancelled.includes(a)
+        !arrivedPenalty.includes(a) && !echoWaiting.includes(a) &&
+        !notArrived.includes(a) && !cancelledPostponed.includes(a)
     );
 
     sortByBN(arrivedPenalty);
+    sortByBN(echoWaiting);
     sortByBN(notArrived);
-    sortByBN(cancelled);
+    sortByBN(cancelledPostponed);
     sortByBN(otherStatuses);
 
     return [
         ...inConsult,
-        ...nextLocked,
         ...emergency,
+        ...nextLocked,
         ...investigation,
         ...readyGroup,
         ...arrivedPenalty,
+        ...echoWaiting,
         ...notArrived,
-        ...cancelled,
+        ...cancelledPostponed,
         ...otherStatuses
     ];
 }
@@ -4043,9 +4111,8 @@ function sortAppointments(field) {
         appointmentCurrentSort.direction = 'asc';
     }
 
-    document.querySelectorAll('#appointmentTable th[data-sort]').forEach(th => th.classList.remove('sorted'));
-    const currentTh = document.querySelector(`#appointmentTable th[data-sort="${field}"]`);
-    if (currentTh) currentTh.classList.add('sorted');
+    document.querySelectorAll('#appointmentTable th[data-sort], #otherAppointmentTable th[data-sort]').forEach(th => th.classList.remove('sorted'));
+    document.querySelectorAll(`#appointmentTable th[data-sort="${field}"], #otherAppointmentTable th[data-sort="${field}"]`).forEach(th => th.classList.add('sorted'));
 
     let sorted = [...appointments];
     sorted.sort((a, b) => {
@@ -4135,34 +4202,22 @@ function updateQueueSummary() {
     const today = toLocalDateString(new Date());
     const todayAppointments = appointments.filter(a => a.appointmentTime && a.appointmentTime.startsWith(today));
 
-    const waiting = todayAppointments.filter(a =>
+    // --- Dr. Soe Chan Myae ---
+    const doctorAppointments = todayAppointments.filter(a => a.doctorName === TARGET_DOCTOR_NAME);
+
+    const dWaiting = doctorAppointments.filter(a =>
         ['Noted', 'Booked', 'Arrived', 'Investigation'].includes(a.status)
     ).length;
-
-    const inConsult = todayAppointments.filter(a =>
-        a.status === 'In Consult'
-    ).length;
-
-    const done = todayAppointments.filter(a =>
-        a.status === 'Done'
-    ).length;
-
-    // Find next patient - ONLY for Dr. Soe Chan Myae
-    const doctorAppointments = todayAppointments.filter(a =>
-        a.doctorName === TARGET_DOCTOR_NAME
-    );
+    const dInConsult = doctorAppointments.filter(a => a.status === 'In Consult').length;
+    const dDone = doctorAppointments.filter(a => a.status === 'Done').length;
 
     const eligibleForNext = doctorAppointments.filter(a =>
         ['Arrived', 'Investigation', 'Booked', 'Noted'].includes(a.status)
     );
-
     const queueSorted = sortAppointmentsForQueue(eligibleForNext);
     const nextPatient = queueSorted[0];
-
-    // Find current consulting patient
     const currentConsult = doctorAppointments.find(a => a.status === 'In Consult');
 
-    // Check if next patient has penalty or echo waiting turns
     let nextPatientDisplay = '-';
     if (nextPatient) {
         const penaltyInfo = nextPatient.penaltyTurns > 0 ? ` ⚠️` : nextPatient.bookingType === 'Echo Urgent' && nextPatient.waitingTurns > 0 ? ` Echo wait - ${nextPatient.waitingTurns}` : '';
@@ -4170,17 +4225,33 @@ function updateQueueSummary() {
         nextPatientDisplay = `${nextPatient.patientName} (#${nextPatient.bookingNumber || '-'})${penaltyInfo}${lockedInfo}`;
     }
 
-    // Display current consulting patient
     let currentConsultDisplay = '-';
     if (currentConsult) {
         currentConsultDisplay = `${currentConsult.patientName} (#${currentConsult.bookingNumber || '-'})`;
     }
 
-    elements.waitingCount.textContent = waiting;
-    elements.inConsultCount.textContent = inConsult;
-    elements.doneCount.textContent = done;
+    elements.waitingCount.textContent = dWaiting;
+    elements.inConsultCount.textContent = dInConsult;
+    elements.doneCount.textContent = dDone;
     elements.nextPatientName.textContent = nextPatientDisplay;
     elements.currentConsultName.textContent = currentConsultDisplay;
+
+    // --- Other Patients (non-DSCM) ---
+    const otherAppointments = todayAppointments.filter(a => a.doctorName !== TARGET_DOCTOR_NAME);
+
+    const oWaiting = otherAppointments.filter(a =>
+        ['Noted', 'Booked', 'Arrived', 'Investigation'].includes(a.status)
+    ).length;
+    const oInConsult = otherAppointments.filter(a => a.status === 'In Consult').length;
+    const oDone = otherAppointments.filter(a => a.status === 'Done').length;
+
+    const otherWaitingEl = document.getElementById('otherWaitingCount');
+    const otherInConsultEl = document.getElementById('otherInConsultCount');
+    const otherDoneEl = document.getElementById('otherDoneCount');
+
+    if (otherWaitingEl) otherWaitingEl.textContent = oWaiting;
+    if (otherInConsultEl) otherInConsultEl.textContent = oInConsult;
+    if (otherDoneEl) otherDoneEl.textContent = oDone;
 }
 
 /**
@@ -6265,7 +6336,8 @@ function setupEventListeners() {
     elements.patientAddress.addEventListener('blur', () => {
         setTimeout(() => {
             if (!document.activeElement.closest('#patientAddress') && elements.patientAddress.value) {
-                elements.patientPhone.focus();
+                const firstInput = elements.patientPhonesContainer.querySelector('.patient-phone-input');
+                if (firstInput) firstInput.focus();
             }
         }, 200);
     });
@@ -6304,9 +6376,25 @@ function setupEventListeners() {
     });
 
     // Patient - Copy phone
-    elements.patientCopyPhoneBtn.addEventListener('click', copyPatientPhone);
-    elements.patientPhone.addEventListener('click', () => {
-        if (elements.patientPhone.value.trim()) copyPatientPhone();
+    document.getElementById('patientPhonesContainer').addEventListener('click', (e) => {
+        if (e.target.closest('.phone-copy-btn')) copyPatientPhone();
+    });
+
+    // Patient - Add phone
+    document.getElementById('addPhoneBtn').addEventListener('click', () => {
+        const entry = document.createElement('div');
+        entry.className = 'phone-entry';
+        entry.innerHTML = `<input type="tel" class="form-control patient-phone-input" placeholder="Enter phone number" pattern="[0-9]*" inputmode="tel">
+            <button type="button" class="copy-btn phone-copy-btn" title="Copy all numbers">📋</button>
+            <button type="button" class="btn-remove-phone">✕</button>`;
+        entry.querySelector('.btn-remove-phone').addEventListener('click', () => {
+            entry.remove();
+            updateRemoveButtons();
+        });
+        entry.querySelector('.phone-copy-btn').addEventListener('click', () => copyPatientPhone());
+        elements.patientPhonesContainer.appendChild(entry);
+        entry.querySelector('.patient-phone-input').focus();
+        updateRemoveButtons();
     });
 
     // Patient - Address blur auto-save
@@ -6348,7 +6436,8 @@ function setupEventListeners() {
         const patientName = document.getElementById('patientName').value;
         const patientAge = document.getElementById('patientAge').value;
         const patientAddress = document.getElementById('patientAddress').value;
-        const patientPhone = document.getElementById('patientPhone').value;
+        const phones = getPhoneValues();
+        const patientPhone = phones[0] || '';
         if (patientId) printBarcodeBluetooth(patientId, patientName, patientAge, patientAddress, patientPhone);
     });
 
@@ -6819,7 +6908,7 @@ function setupEventListeners() {
     });
 
     // Appointment table sorting
-    document.querySelectorAll('#appointmentTable th[data-sort]').forEach(th => {
+    document.querySelectorAll('#appointmentTable th[data-sort], #otherAppointmentTable th[data-sort]').forEach(th => {
         th.addEventListener('click', () => sortAppointments(th.dataset.sort));
     });
 
