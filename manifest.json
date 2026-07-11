@@ -61,5 +61,11 @@
     "lang": "en-US",
     "dir": "ltr",
     "scope": "/",
-    "prefer_related_applications": false
+    "prefer_related_applications": false,
+    "protocol_handlers": [
+        {
+            "protocol": "web+twokclinic",
+            "url": "/?incoming=%s"
+        }
+    ]
 }

@@ -910,6 +910,12 @@ function selectPatientForRegistration(patientId) {
     
     // Ask for confirmation to load existing patient
     if (confirm(`Patient "${patient.name}" already exists. Do you want to load their information for editing?`)) {
+        // If from incoming call flow, ask about saving the phone as secondary
+        if (window._incomingCallPrefillPhone && window.patientFormSourceSection === 'appointment') {
+            if (!confirm('Do you want to save this phone number ' + window._incomingCallPrefillPhone + ' as secondary phone number?')) {
+                window._incomingCallPrefillPhone = null;
+            }
+        }
         // If from appointment form, close patient form and populate appointment directly
         if (window.patientFormSourceSection === 'appointment') {
             closePatientFormModal();
@@ -1010,9 +1016,69 @@ async function init() {
 
     // Handle URL query params (from incoming-call page or external links)
     const params = new URLSearchParams(window.location.search);
+
+    // Handle custom URL scheme protocol (web+twokclinic:// from Android Automate)
+    const incomingParam = params.get('incoming');
+    if (incomingParam) {
+        try {
+            const queryPart = incomingParam.split('?')[1] || '';
+            const ip = new URLSearchParams(queryPart);
+            if (ip.has('phone')) {
+                params.set('phone', ip.get('phone'));
+                params.set('action', 'incomingCall');
+            }
+        } catch (e) {
+            console.error('Failed to parse incoming URL:', e);
+        }
+    }
+
     const patientIdParam = params.get('patientId');
     const phoneParam = params.get('phone');
-    if (patientIdParam) {
+    const patientNameParam = params.get('patientName');
+    const actionParam = params.get('action');
+
+    if (actionParam === 'incomingCall' && phoneParam) {
+        incomingCallOpen(phoneParam);
+    } else if (actionParam === 'newPatient' && phoneParam) {
+        switchSection('patient');
+        resetPatientForm();
+        setPhoneValues([phoneParam]);
+        openPatientFormModal();
+        showNotification('New patient registration - phone pre-filled from incoming call', 'info');
+    } else if (actionParam === 'createAppointment') {
+        switchSection('appointment');
+        openAppointmentFormModal();
+        // Select patient if patientId is provided
+        if (patientIdParam) {
+            const patient = patients.find(p => p.id === patientIdParam);
+            if (patient) {
+                selectPatient(patient.id);
+            } else if (patientNameParam) {
+                elements.appointmentPatient.value = patientNameParam;
+                elements.appointmentPatientId.value = '';
+            }
+        } else if (patientNameParam) {
+            elements.appointmentPatient.value = patientNameParam;
+            elements.appointmentPatientId.value = '';
+        }
+        // Set doctor to Dr. Soe Chan Myae
+        const targetDoctor = doctors.find(d => d.name === TARGET_DOCTOR_NAME);
+        if (targetDoctor) {
+            elements.appointmentDoctor.value = targetDoctor.name;
+            elements.appointmentDoctorId.value = targetDoctor.id;
+        } else {
+            elements.appointmentDoctor.value = TARGET_DOCTOR_NAME;
+        }
+        // Focus on date/time field
+        setTimeout(() => elements.appointmentDateTime.focus(), 300);
+    } else if (actionParam === 'openLabTracker') {
+        switchSection('lab');
+        if (patientNameParam) {
+            elements.labSearchInput.value = patientNameParam;
+            filterLabTracker();
+        }
+        showNotification('Lab tracker - searching for ' + (patientNameParam || 'all records'), 'info');
+    } else if (patientIdParam) {
         const patient = patients.find(p => p.id === patientIdParam);
         if (patient) {
             loadPatientToForm(patient.id);
@@ -1976,7 +2042,7 @@ async function printBarcodeBluetooth(patientId, patientName, patientAge, patient
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        const pad = 8 * scale;
+        const pad = 6 * scale;
         const availW = canvas.width - pad * 2;
         const drawX = canvas.width / 2;
         ctx.fillStyle = '#000000';
@@ -1990,37 +2056,37 @@ async function printBarcodeBluetooth(patientId, patientName, patientAge, patient
             ctx.fillText(line, drawX, y);
             y += nameLineH;
         }
-        y += 3 * scale;
+        y += 1 * scale;
         ctx.textAlign = 'left';
-        ctx.font = `bold ${22 * scale}px Arial, 'Noto Sans Myanmar', 'Padauk', 'Myanmar Text', sans-serif`;
+        ctx.font = `${22 * scale}px Arial, 'Noto Sans Myanmar', 'Padauk', 'Myanmar Text', sans-serif`;
         const ageText = patientAge ? 'Age: ' + patientAge : '';
-        const addrText = patientAddress ? '(' + patientAddress.split('\n')[0].substring(0, 30) + ')' : '';
-        const combined = [ageText, addrText].filter(Boolean).join('  ');
+        const addrText = patientAddress ? '(' + patientAddress.split('\n')[0].substring(0, 20) + ')' : '';
+        const combined = [ageText, addrText].filter(Boolean).join(' ');
         if (combined) {
             ctx.fillText(combined, pad, y);
             y += 28 * scale;
         }
         if (patientPhone) {
-            ctx.fillText('Tel: ' + patientPhone, pad, y);
+            ctx.fillText(patientPhone, pad, y);
             y += 28 * scale;
         }
-        y += 2 * scale;
+        y += 1 * scale;
         ctx.textAlign = 'center';
         if (typeof JsBarcode !== 'undefined') {
-            const barcodeMmW = 36;
-            const barcodeH = Math.max(canvas.height - y - pad * 2, 60 * scale);
+            const barcodeMmW = 40;
+            const barcodeH = Math.min(Math.max(canvas.height - y - pad, 80 * scale), 100 * scale);
             const barcodeTargetW = Math.round(barcodeMmW * dotsPerMm * scale);
             const barcodeCanvas = document.createElement('canvas');
             JsBarcode(barcodeCanvas, patientId, {
                 format: 'CODE128',
-                width: 2.5 * scale,
-                height: Math.round(barcodeH * 1.5),
+                width: 2 * scale,
+                height: Math.round(barcodeH * 1.2),
                 displayValue: true,
-                fontSize: 12 * scale,
-                margin: 5 * scale
+                fontSize: 10 * scale,
+                margin: 0
             });
-            const bx = (canvas.width - barcodeTargetW) / 2;
-            ctx.drawImage(barcodeCanvas, bx, y, barcodeTargetW, barcodeH);
+            const bx = pad;
+            ctx.drawImage(barcodeCanvas, bx, y, availW, barcodeH);
         }
         const printerCanvas = document.createElement('canvas');
         printerCanvas.width = printerW;
@@ -2529,6 +2595,7 @@ function savePatient(e) {
         elements.patientInfoDisplay.style.display = 'grid';
         // Focus on doctor field
         setTimeout(() => elements.appointmentDoctor.focus(), 200);
+        window._incomingCallPrefillPhone = null;
         return;
     }
     closePatientFormModal();
@@ -5128,6 +5195,28 @@ function selectPatient(patientId) {
     console.log('selectPatient: about to check lab results for', patient.id, patient.name);
     displayPendingLabResults(patient.id, patient.name);
 
+    // If from incoming call flow, add the incoming phone as second number to existing patient
+    if (window._incomingCallPrefillPhone) {
+        var incomingPhone = window._incomingCallPrefillPhone;
+        var existingPhones = patient.phone ? patient.phone.split(',').map(function (p) { return p.trim(); }).filter(Boolean) : [];
+        var normalizedIncoming = incomingCallNormalizePhone(incomingPhone);
+        var alreadyExists = existingPhones.some(function (p) { return incomingCallNormalizePhone(p) === normalizedIncoming; });
+        if (!alreadyExists) {
+            existingPhones.push(incomingPhone);
+            patient.phone = existingPhones.join(', ');
+            var idx = patients.findIndex(function (p) { return p.id === patient.id; });
+            if (idx >= 0) {
+                patients[idx] = patient;
+                savePatientsToStorage();
+            }
+            elements.displayPatientPhone.value = patient.phone;
+            showNotification('Incoming phone number added to ' + patient.name, 'success');
+        } else {
+            showNotification('Phone number already exists for this patient', 'info');
+        }
+        window._incomingCallPrefillPhone = null;
+    }
+
     elements.appointmentDoctor.focus();
 }
 
@@ -5177,6 +5266,11 @@ function showDoctorAutocomplete(searchTerm) {
 
 function openPatientFormFromAutocomplete() {
     elements.patientAutocomplete.classList.add('hidden');
+    if (window._incomingCallPrefillPhone) {
+        setPhoneValues([window._incomingCallPrefillPhone]);
+        window._incomingCallPrefillPhone = null;
+        window.patientFormSourceSection = 'appointment';
+    }
     openPatientFormModal();
 }
 
@@ -11329,6 +11423,292 @@ window.jumpToCalendarDate = jumpToCalendarDate;
 // Listen for online/offline events
 window.addEventListener('online', updateCalendarConnectionStatus);
 window.addEventListener('offline', updateCalendarConnectionStatus);
+
+// ==================== INCOMING CALL OVERLAY ====================
+var incomingCallPhone = '';
+var incomingCallDbPatients = [];
+var incomingCallDbLoaded = false;
+
+function incomingCallOpen(phone) {
+    incomingCallPhone = phone;
+    document.getElementById('incomingCallPhone').textContent = '📞 ' + phone;
+    document.getElementById('incomingCallHeaderIcon').textContent = '📞';
+    document.getElementById('incomingCallFloatBadge').textContent = '1';
+    document.getElementById('incomingCallAddPhoneSection').style.display = 'none';
+    document.getElementById('incomingCallPatientSearch').value = '';
+    document.getElementById('incomingCallResults').innerHTML = '';
+    incomingCallRestore();
+    incomingCallSearchByPhone(phone);
+}
+
+function incomingCallMinimize() {
+    document.getElementById('incomingCallOverlay').classList.add('hidden');
+    document.body.style.overflow = '';
+    document.getElementById('incomingCallFloatingIcon').style.display = 'flex';
+}
+
+function incomingCallRestore() {
+    document.getElementById('incomingCallFloatingIcon').style.display = 'none';
+    document.getElementById('incomingCallOverlay').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+}
+
+function incomingCallClose() {
+    incomingCallPhone = '';
+    incomingCallDbPatients = [];
+    incomingCallDbLoaded = false;
+    document.getElementById('incomingCallOverlay').classList.add('hidden');
+    document.getElementById('incomingCallFloatingIcon').style.display = 'none';
+    document.body.style.overflow = '';
+    document.getElementById('incomingCallPatientCards').innerHTML = '';
+    document.getElementById('incomingCallResults').innerHTML = '';
+    document.getElementById('incomingCallAddPhoneSection').style.display = 'none';
+    document.getElementById('incomingCallPatientSearch').value = '';
+    window._incomingCallPrefillPhone = null;
+}
+
+function incomingCallCreateNewPatient() {
+    if (!incomingCallPhone) return;
+    incomingCallMinimize();
+    switchSection('patient');
+    resetPatientForm();
+    setPhoneValues([incomingCallPhone]);
+    openPatientFormModal();
+    showNotification('New patient registration - phone pre-filled from incoming call', 'info');
+}
+
+function incomingCallToggleAddPhone() {
+    var section = document.getElementById('incomingCallAddPhoneSection');
+    var isVisible = section.style.display !== 'none';
+    section.style.display = isVisible ? 'none' : 'block';
+    if (!isVisible) {
+        if (!incomingCallDbLoaded) incomingCallLoadPatientDb();
+        setTimeout(function () { document.getElementById('incomingCallPatientSearch').focus(); }, 200);
+    }
+}
+
+async function incomingCallSearchByPhone(phone) {
+    var cardsEl = document.getElementById('incomingCallPatientCards');
+    var countEl = document.getElementById('incomingCallCount');
+    cardsEl.innerHTML = '<div style="text-align:center;padding:20px;color:#6b7280;">Searching...</div>';
+    try {
+        var resp = await fetch('/api/patients/search?phone=' + encodeURIComponent(phone));
+        var data = await resp.json();
+        if (data.success && data.patients && data.patients.length > 0) {
+            countEl.textContent = data.patients.length + ' patient' + (data.patients.length !== 1 ? 's' : '') + ' found';
+            var phoneEnc = encodeURIComponent(phone);
+            cardsEl.innerHTML = data.patients.map(function (p) {
+                var ageDisplay = p.age || '-';
+                var sexDisplay = p.sex || '-';
+                var phoneDisplay = p.phone || '-';
+                var id = p.id || '';
+                var name = p.name || 'Unknown';
+                var idEnc = encodeURIComponent(id);
+                var qSafeName = name.replace(/'/g, "\\'");
+                return '<div class="incoming-call-card">' +
+                    '<div class="incoming-call-card-header">' +
+                    '<div>' +
+                    '<h3>' + escapeHtml(name) + '</h3>' +
+                    '<p style="margin:2px 0 0;font-size:0.85rem;color:#6b7280;">🆔 ' + escapeHtml(id) + '</p>' +
+                    '</div>' +
+                    '<button class="incoming-call-action-btn" style="background:#2563eb;border:none;color:white;padding:8px 16px;border-radius:8px;font-size:0.85rem;cursor:pointer;white-space:nowrap;" onclick="incomingCallOpenPatient(\'' + idEnc + '\',\'' + phoneEnc + '\')">👤 Open</button>' +
+                    '</div>' +
+                    '<div class="incoming-call-card-details">' +
+                    '<span>📞 ' + escapeHtml(phoneDisplay) + '</span>' +
+                    '<span>🎂 ' + escapeHtml(ageDisplay) + '</span>' +
+                    '<span>⚤ ' + escapeHtml(sexDisplay) + '</span>' +
+                    '<span>📍 ' + escapeHtml(p.address || '-') + '</span>' +
+                    '</div>' +
+                    '<div class="incoming-call-card-actions">' +
+                    '<button class="create-appt" style="border:none;cursor:pointer;display:inline-flex;align-items:center;gap:4px;color:white;padding:6px 12px;border-radius:6px;font-size:0.8rem;font-weight:500;background:#059669;" onclick="incomingCallCreateAppointment(\'' + idEnc + '\',\'' + qSafeName + '\',\'' + phoneEnc + '\')">📅 Appointment</button>' +
+                    '<button class="lab-tracker" style="border:none;cursor:pointer;display:inline-flex;align-items:center;gap:4px;color:white;padding:6px 12px;border-radius:6px;font-size:0.8rem;font-weight:500;background:#7c3aed;" onclick="incomingCallOpenLabTracker(\'' + qSafeName + '\',\'' + phoneEnc + '\')">🔬 Lab Results</button>' +
+                    '</div>' +
+                    '</div>';
+            }).join('') + incomingCallSomeoneElseCard(phoneEnc, phone);
+        } else {
+            countEl.textContent = '0 patients found';
+            cardsEl.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#6b7280;">' +
+                '<p style="font-size:1.2rem;">😕 No patients found with phone <strong>' + escapeHtml(phone) + '</strong></p>' +
+                '</div>' + incomingCallSomeoneElseCard(encodeURIComponent(phone), phone);
+        }
+    } catch (e) {
+        console.error('[IncomingCall] Search error:', e);
+        countEl.textContent = 'Search failed';
+        cardsEl.innerHTML = '<div style="text-align:center;padding:20px;color:#ef4444;">❌ Error searching: ' + escapeHtml(e.message) + '</div>';
+    }
+}
+
+function incomingCallSomeoneElseCard(phoneEnc, phoneRaw) {
+    var safe = escapeHtml(phoneRaw);
+    return '<div class="incoming-call-card" style="border:2px dashed #d1d5db;background:#fafafa;">' +
+        '<div class="incoming-call-card-header">' +
+        '<div>' +
+        '<h3 style="color:#6b7280;">👤 Calling for Someone Else</h3>' +
+        '<p style="margin:2px 0 0;font-size:0.85rem;color:#9ca3af;">Phone <strong>' + safe + '</strong> belongs to caller, not the patient</p>' +
+        '</div>' +
+        '</div>' +
+        '<div class="incoming-call-card-actions" style="margin-top:10px;">' +
+        '<button class="create-appt" style="border:none;cursor:pointer;display:inline-flex;align-items:center;gap:4px;color:white;padding:6px 12px;border-radius:6px;font-size:0.8rem;font-weight:500;background:#059669;" onclick="incomingCallRegisterForSomeoneElse(\'' + phoneEnc + '\')">📅 Create Appointment</button>' +
+        '</div>' +
+        '</div>';
+}
+
+function incomingCallRegisterForSomeoneElse(phoneEnc) {
+    incomingCallMinimize();
+    var phone = decodeURIComponent(phoneEnc);
+    window._incomingCallPrefillPhone = phone;
+    window.patientFormSourceSection = 'appointment';
+    switchSection('appointment');
+    openAppointmentFormModal();
+    setTimeout(function () {
+        elements.patientAutocomplete.classList.add('hidden');
+        elements.patientFormTitle.textContent = 'Register New Patient (for Appointment)';
+        setPhoneValues([phone]);
+        openPatientFormModal();
+    }, 350);
+    showNotification('Register new patient with phone pre-filled, or select an existing patient (incoming number will be added as second phone)', 'info');
+}
+
+function incomingCallOpenPatient(idEnc, phoneEnc) {
+    incomingCallMinimize();
+    window.location.href = '/?patientId=' + idEnc + '&phone=' + phoneEnc;
+}
+
+function incomingCallCreateAppointment(idEnc, nameRaw, phoneEnc) {
+    incomingCallMinimize();
+    switchSection('appointment');
+    openAppointmentFormModal();
+    var patientId = decodeURIComponent(idEnc);
+    var patient = patients.find(function(p) { return p.id === patientId; });
+    if (patient) {
+        selectPatient(patient.id);
+    } else if (nameRaw) {
+        elements.appointmentPatient.value = nameRaw;
+        elements.appointmentPatientId.value = '';
+    }
+    var targetDoctor = doctors.find(function(d) { return d.name === TARGET_DOCTOR_NAME; });
+    if (targetDoctor) {
+        elements.appointmentDoctor.value = targetDoctor.name;
+        elements.appointmentDoctorId.value = targetDoctor.id;
+    } else {
+        elements.appointmentDoctor.value = TARGET_DOCTOR_NAME;
+    }
+    setTimeout(function() { elements.appointmentDateTime.focus(); }, 300);
+}
+
+function incomingCallOpenLabTracker(nameRaw, phoneEnc) {
+    incomingCallMinimize();
+    switchSection('lab');
+    if (nameRaw) {
+        elements.labSearchInput.value = nameRaw;
+        filterLabTracker();
+    }
+    showNotification('Lab tracker - searching for ' + (nameRaw || 'all records'), 'info');
+}
+
+async function incomingCallLoadPatientDb() {
+    var loadingEl = document.getElementById('incomingCallLoading');
+    loadingEl.style.display = 'block';
+    try {
+        if (typeof TWOKDB !== 'undefined' && TWOKDB.getAll) {
+            incomingCallDbPatients = await TWOKDB.getAll(TWOKDB.STORES.PATIENTS);
+            if (!Array.isArray(incomingCallDbPatients)) incomingCallDbPatients = [];
+            incomingCallDbLoaded = true;
+        } else {
+            incomingCallDbPatients = (typeof patients !== 'undefined' ? patients : []).slice();
+            incomingCallDbLoaded = true;
+        }
+    } catch (e) {
+        console.error('[IncomingCall] Failed to load patients:', e);
+        incomingCallDbPatients = (typeof patients !== 'undefined' ? patients : []).slice();
+        incomingCallDbLoaded = true;
+    }
+    loadingEl.style.display = 'none';
+}
+
+function incomingCallSearchPatients(query) {
+    var resultsEl = document.getElementById('incomingCallResults');
+    var term = (query || '').toLowerCase().trim();
+    if (!term || !incomingCallDbLoaded || incomingCallDbPatients.length === 0) {
+        resultsEl.innerHTML = (!incomingCallDbLoaded && term) ? '<div style="padding:16px;text-align:center;color:#6b7280;">Loading patients...</div>' : '';
+        return;
+    }
+    var matches = incomingCallDbPatients.filter(function (p) {
+        return (p.name || '').toLowerCase().includes(term);
+    }).slice(0, 15);
+    if (matches.length === 0) {
+        resultsEl.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:0.9rem;">No patients found matching "' + escapeHtml(term) + '"</div>';
+        return;
+    }
+    resultsEl.innerHTML = matches.map(function (p) {
+        var existingPhones = (p.phone || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+        var normalizedCaller = incomingCallNormalizePhone(incomingCallPhone);
+        var phoneAlreadyAdded = existingPhones.some(function (ph) { return incomingCallNormalizePhone(ph) === normalizedCaller; });
+        var statusHtml = phoneAlreadyAdded
+            ? '<span class="added-badge">✓ Already Added</span>'
+            : '<button class="add-btn" onclick="incomingCallAddPhone(\'' + (p.id || '').replace(/'/g, "\\'") + '\', this)">+ Add Phone</button>';
+        return '<div class="incoming-call-result-item">' +
+            '<div class="info">' +
+            '<div class="name">' + escapeHtml(p.name) + '</div>' +
+            '<div class="detail">🆔 ' + escapeHtml(p.id) + ' &middot; 📞 ' + escapeHtml(p.phone || '-') + '</div>' +
+            '</div>' +
+            statusHtml +
+            '</div>';
+    }).join('');
+}
+
+async function incomingCallAddPhone(patientId, btn) {
+    if (!incomingCallPhone) return;
+    btn.disabled = true;
+    btn.textContent = '...';
+    try {
+        var patient = incomingCallDbPatients.find(function (p) { return p.id === patientId; });
+        if (!patient) { showNotification('Patient not found', 'warning'); return; }
+        var existingPhones = (patient.phone || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+        if (existingPhones.some(function (ph) { return incomingCallNormalizePhone(ph) === incomingCallNormalizePhone(incomingCallPhone); })) {
+            showNotification('Phone already exists for ' + patient.name, 'warning');
+            btn.outerHTML = '<span class="added-badge">✓ Already Added</span>';
+            return;
+        }
+        existingPhones.push(incomingCallPhone);
+        patient.phone = existingPhones.join(', ');
+        await TWOKDB.put(TWOKDB.STORES.PATIENTS, patient);
+        var idx = incomingCallDbPatients.findIndex(function (p) { return p.id === patientId; });
+        if (idx >= 0) incomingCallDbPatients[idx] = patient;
+        showNotification('✅ Phone added to ' + patient.name, 'success');
+        btn.outerHTML = '<span class="added-badge">✓ Added</span>';
+    } catch (e) {
+        console.error('[IncomingCall] Error adding phone:', e);
+        showNotification('❌ Error: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = '+ Add Phone';
+    }
+}
+
+function incomingCallNormalizePhone(ph) {
+    return String(ph).replace(/[\s\-\(\)\+]/g, '');
+}
+
+// Expose globally
+window.incomingCallOpen = incomingCallOpen;
+window.incomingCallMinimize = incomingCallMinimize;
+window.incomingCallRestore = incomingCallRestore;
+window.incomingCallClose = incomingCallClose;
+window.incomingCallCreateNewPatient = incomingCallCreateNewPatient;
+window.incomingCallToggleAddPhone = incomingCallToggleAddPhone;
+window.incomingCallSearchPatients = incomingCallSearchPatients;
+window.incomingCallAddPhone = incomingCallAddPhone;
+window.incomingCallOpenPatient = incomingCallOpenPatient;
+window.incomingCallCreateAppointment = incomingCallCreateAppointment;
+window.incomingCallOpenLabTracker = incomingCallOpenLabTracker;
+
+// Wire header buttons
+document.addEventListener('DOMContentLoaded', function () {
+    var closeBtn = document.getElementById('closeIncomingCallOverlay');
+    if (closeBtn) closeBtn.addEventListener('click', incomingCallClose);
+    var minBtn = document.getElementById('minimizeIncomingCallOverlay');
+    if (minBtn) minBtn.addEventListener('click', incomingCallMinimize);
+});
 
 // ==================== INIT ====================
 document.addEventListener('DOMContentLoaded', init);
