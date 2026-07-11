@@ -11429,27 +11429,86 @@ var incomingCallPhone = '';
 var incomingCallDbPatients = [];
 var incomingCallDbLoaded = false;
 
+function ensureIncomingCallOverlay() {
+    if (document.getElementById('incomingCallOverlay')) return true;
+    var html =
+        '<div id="incomingCallFloatingIcon" class="incoming-call-float" style="display:none;" onclick="incomingCallRestore()">' +
+        '<span>📞</span>' +
+        '<span id="incomingCallFloatBadge" class="incoming-call-float-badge">1</span>' +
+        '</div>' +
+        '<div id="incomingCallOverlay" class="modal hidden">' +
+        '<div class="modal-content incoming-call-modal">' +
+        '<div class="modal-header">' +
+        '<h3><span id="incomingCallHeaderIcon">📞</span> Incoming Call</h3>' +
+        '<div class="incoming-call-header-btns">' +
+        '<button type="button" class="incoming-call-header-btn" title="Minimize">─</button>' +
+        '<button type="button" class="incoming-call-header-btn" title="Close">&times;</button>' +
+        '</div></div>' +
+        '<div class="modal-body">' +
+        '<div id="incomingCallPhone" class="incoming-call-phone"></div>' +
+        '<div class="incoming-call-toolbar">' +
+        '<button class="incoming-call-btn primary" onclick="incomingCallCreateNewPatient()">➕ Create New Patient</button>' +
+        '<button class="incoming-call-btn secondary" onclick="incomingCallToggleAddPhone()">📞 Add Phone to Existing</button>' +
+        '</div>' +
+        '<div id="incomingCallAddPhoneSection" class="incoming-call-add-phone" style="display:none;">' +
+        '<h4>📞 Add Phone to Existing Patient</h4>' +
+        '<p style="font-size:0.85rem;color:#6b7280;margin-bottom:10px;">Search for a patient by name to add this phone number.</p>' +
+        '<div class="incoming-call-search-wrap">' +
+        '<input type="text" id="incomingCallPatientSearch" placeholder="Type patient name to search..." oninput="incomingCallSearchPatients(this.value)" autocomplete="off">' +
+        '<button onclick="document.getElementById(\'incomingCallPatientSearch\').value=\'\';document.getElementById(\'incomingCallResults\').innerHTML=\'\';">✕</button>' +
+        '</div>' +
+        '<div id="incomingCallResults" class="incoming-call-results"></div>' +
+        '<div id="incomingCallLoading" style="display:none;text-align:center;padding:16px;color:#6b7280;">Loading patients...</div>' +
+        '</div>' +
+        '<div style="text-align:center;margin-top:8px;">' +
+        '<span id="incomingCallCount" class="incoming-call-count-badge"></span></div>' +
+        '<div id="incomingCallPatientCards" class="incoming-call-cards"></div>' +
+        '</div></div></div>';
+    var container = document.createElement('div');
+    container.innerHTML = html;
+    while (container.firstChild) {
+        document.body.appendChild(container.firstChild);
+    }
+    var closeBtn = document.getElementById('closeIncomingCallOverlay') || document.querySelector('#incomingCallOverlay .incoming-call-header-btn[title="Close"]');
+    if (closeBtn) closeBtn.addEventListener('click', incomingCallClose);
+    var minBtn = document.getElementById('minimizeIncomingCallOverlay') || document.querySelector('#incomingCallOverlay .incoming-call-header-btn[title="Minimize"]');
+    if (minBtn) minBtn.addEventListener('click', incomingCallMinimize);
+    console.log('[IncomingCall] Overlay dynamically created');
+    return !!document.getElementById('incomingCallOverlay');
+}
+
 function incomingCallOpen(phone) {
     incomingCallPhone = phone;
-    document.getElementById('incomingCallPhone').textContent = '📞 ' + phone;
-    document.getElementById('incomingCallHeaderIcon').textContent = '📞';
-    document.getElementById('incomingCallFloatBadge').textContent = '1';
-    document.getElementById('incomingCallAddPhoneSection').style.display = 'none';
-    document.getElementById('incomingCallPatientSearch').value = '';
-    document.getElementById('incomingCallResults').innerHTML = '';
+    if (!ensureIncomingCallOverlay()) return;
+    var phoneEl = document.getElementById('incomingCallPhone');
+    if (phoneEl) phoneEl.textContent = '📞 ' + phone;
+    var iconEl = document.getElementById('incomingCallHeaderIcon');
+    if (iconEl) iconEl.textContent = '📞';
+    var badgeEl = document.getElementById('incomingCallFloatBadge');
+    if (badgeEl) badgeEl.textContent = '1';
+    var addPhoneEl = document.getElementById('incomingCallAddPhoneSection');
+    if (addPhoneEl) addPhoneEl.style.display = 'none';
+    var searchEl = document.getElementById('incomingCallPatientSearch');
+    if (searchEl) searchEl.value = '';
+    var resultsEl = document.getElementById('incomingCallResults');
+    if (resultsEl) resultsEl.innerHTML = '';
     incomingCallRestore();
     incomingCallSearchByPhone(phone);
 }
 
 function incomingCallMinimize() {
-    document.getElementById('incomingCallOverlay').classList.add('hidden');
+    var overlay = document.getElementById('incomingCallOverlay');
+    if (overlay) overlay.classList.add('hidden');
     document.body.style.overflow = '';
-    document.getElementById('incomingCallFloatingIcon').style.display = 'flex';
+    var floatIcon = document.getElementById('incomingCallFloatingIcon');
+    if (floatIcon) floatIcon.style.display = 'flex';
 }
 
 function incomingCallRestore() {
-    document.getElementById('incomingCallFloatingIcon').style.display = 'none';
-    document.getElementById('incomingCallOverlay').classList.remove('hidden');
+    var floatIcon = document.getElementById('incomingCallFloatingIcon');
+    if (floatIcon) floatIcon.style.display = 'none';
+    var overlay = document.getElementById('incomingCallOverlay');
+    if (overlay) overlay.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
 }
 
@@ -11457,13 +11516,19 @@ function incomingCallClose() {
     incomingCallPhone = '';
     incomingCallDbPatients = [];
     incomingCallDbLoaded = false;
-    document.getElementById('incomingCallOverlay').classList.add('hidden');
-    document.getElementById('incomingCallFloatingIcon').style.display = 'none';
+    var overlay = document.getElementById('incomingCallOverlay');
+    if (overlay) overlay.classList.add('hidden');
+    var floatIcon = document.getElementById('incomingCallFloatingIcon');
+    if (floatIcon) floatIcon.style.display = 'none';
     document.body.style.overflow = '';
-    document.getElementById('incomingCallPatientCards').innerHTML = '';
-    document.getElementById('incomingCallResults').innerHTML = '';
-    document.getElementById('incomingCallAddPhoneSection').style.display = 'none';
-    document.getElementById('incomingCallPatientSearch').value = '';
+    var cardsEl = document.getElementById('incomingCallPatientCards');
+    if (cardsEl) cardsEl.innerHTML = '';
+    var resultsEl = document.getElementById('incomingCallResults');
+    if (resultsEl) resultsEl.innerHTML = '';
+    var addPhoneEl = document.getElementById('incomingCallAddPhoneSection');
+    if (addPhoneEl) addPhoneEl.style.display = 'none';
+    var searchEl = document.getElementById('incomingCallPatientSearch');
+    if (searchEl) searchEl.value = '';
     window._incomingCallPrefillPhone = null;
 }
 
@@ -11479,17 +11544,19 @@ function incomingCallCreateNewPatient() {
 
 function incomingCallToggleAddPhone() {
     var section = document.getElementById('incomingCallAddPhoneSection');
+    if (!section) return;
     var isVisible = section.style.display !== 'none';
     section.style.display = isVisible ? 'none' : 'block';
     if (!isVisible) {
         if (!incomingCallDbLoaded) incomingCallLoadPatientDb();
-        setTimeout(function () { document.getElementById('incomingCallPatientSearch').focus(); }, 200);
+        setTimeout(function () { var el = document.getElementById('incomingCallPatientSearch'); if (el) el.focus(); }, 200);
     }
 }
 
 async function incomingCallSearchByPhone(phone) {
     var cardsEl = document.getElementById('incomingCallPatientCards');
     var countEl = document.getElementById('incomingCallCount');
+    if (!cardsEl || !countEl) return;
     cardsEl.innerHTML = '<div style="text-align:center;padding:20px;color:#6b7280;">Searching...</div>';
     try {
         var resp = await fetch('/api/patients/search?phone=' + encodeURIComponent(phone));
@@ -11533,8 +11600,8 @@ async function incomingCallSearchByPhone(phone) {
         }
     } catch (e) {
         console.error('[IncomingCall] Search error:', e);
-        countEl.textContent = 'Search failed';
-        cardsEl.innerHTML = '<div style="text-align:center;padding:20px;color:#ef4444;">❌ Error searching: ' + escapeHtml(e.message) + '</div>';
+        if (countEl) countEl.textContent = 'Search failed';
+        if (cardsEl) cardsEl.innerHTML = '<div style="text-align:center;padding:20px;color:#ef4444;">❌ Error searching: ' + escapeHtml(e.message) + '</div>';
     }
 }
 
@@ -11608,7 +11675,7 @@ function incomingCallOpenLabTracker(nameRaw, phoneEnc) {
 
 async function incomingCallLoadPatientDb() {
     var loadingEl = document.getElementById('incomingCallLoading');
-    loadingEl.style.display = 'block';
+    if (loadingEl) loadingEl.style.display = 'block';
     try {
         if (typeof TWOKDB !== 'undefined' && TWOKDB.getAll) {
             incomingCallDbPatients = await TWOKDB.getAll(TWOKDB.STORES.PATIENTS);
@@ -11623,11 +11690,12 @@ async function incomingCallLoadPatientDb() {
         incomingCallDbPatients = (typeof patients !== 'undefined' ? patients : []).slice();
         incomingCallDbLoaded = true;
     }
-    loadingEl.style.display = 'none';
+    if (loadingEl) loadingEl.style.display = 'none';
 }
 
 function incomingCallSearchPatients(query) {
     var resultsEl = document.getElementById('incomingCallResults');
+    if (!resultsEl) return;
     var term = (query || '').toLowerCase().trim();
     if (!term || !incomingCallDbLoaded || incomingCallDbPatients.length === 0) {
         resultsEl.innerHTML = (!incomingCallDbLoaded && term) ? '<div style="padding:16px;text-align:center;color:#6b7280;">Loading patients...</div>' : '';

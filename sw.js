@@ -95,9 +95,39 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
+    // Handle navigation requests (HTML pages) - network first
+    if (request.mode === 'navigate') {
+        event.respondWith(handleNavigationRequest(request));
+        return;
+    }
+
     // Handle static asset requests
     event.respondWith(handleStaticRequest(request));
 });
+
+/**
+ * Handle navigation requests (HTML pages) - network first, fallback to cache
+ */
+async function handleNavigationRequest(request) {
+    try {
+        const networkResponse = await fetch(request);
+        if (networkResponse && networkResponse.ok) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+                cache.put(request, responseToCache);
+            });
+        }
+        return networkResponse;
+    } catch (error) {
+        console.log('[Service Worker] Network failed for navigation, serving from cache:', request.url);
+        const cachedResponse = await caches.match(request);
+        if (cachedResponse) {
+            return cachedResponse;
+        }
+        // Fallback to index.html for SPA
+        return caches.match('./index.html');
+    }
+}
 
 /**
  * Handle static asset requests

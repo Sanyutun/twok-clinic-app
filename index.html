@@ -384,6 +384,49 @@
         </div>
     </div>
 
+    <!-- Floating Incoming Call Icon (shown when minimized) -->
+    <div id="incomingCallFloatingIcon" class="incoming-call-float" style="display:none;" onclick="incomingCallRestore()">
+        <span>📞</span>
+        <span id="incomingCallFloatBadge" class="incoming-call-float-badge">1</span>
+    </div>
+
+    <!-- Incoming Call Overlay -->
+    <div id="incomingCallOverlay" class="modal hidden">
+        <div class="modal-content incoming-call-modal">
+            <div class="modal-header">
+                <h3><span id="incomingCallHeaderIcon">📞</span> Incoming Call</h3>
+                <div class="incoming-call-header-btns">
+                    <button type="button" id="minimizeIncomingCallOverlay" class="incoming-call-header-btn" title="Minimize">─</button>
+                    <button type="button" id="closeIncomingCallOverlay" class="incoming-call-header-btn" title="Close">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div id="incomingCallPhone" class="incoming-call-phone"></div>
+
+                <div class="incoming-call-toolbar">
+                    <button class="incoming-call-btn primary" onclick="incomingCallCreateNewPatient()">➕ Create New Patient</button>
+                    <button class="incoming-call-btn secondary" onclick="incomingCallToggleAddPhone()">📞 Add Phone to Existing</button>
+                </div>
+
+                <div id="incomingCallAddPhoneSection" class="incoming-call-add-phone" style="display:none;">
+                    <h4>📞 Add Phone to Existing Patient</h4>
+                    <p style="font-size:0.85rem;color:#6b7280;margin-bottom:10px;">Search for a patient by name to add this phone number.</p>
+                    <div class="incoming-call-search-wrap">
+                        <input type="text" id="incomingCallPatientSearch" placeholder="Type patient name to search..." oninput="incomingCallSearchPatients(this.value)" autocomplete="off">
+                        <button onclick="document.getElementById('incomingCallPatientSearch').value='';document.getElementById('incomingCallResults').innerHTML='';">✕</button>
+                    </div>
+                    <div id="incomingCallResults" class="incoming-call-results"></div>
+                    <div id="incomingCallLoading" style="display:none;text-align:center;padding:16px;color:#6b7280;">Loading patients...</div>
+                </div>
+
+                <div style="text-align:center;margin-top:8px;">
+                    <span id="incomingCallCount" class="incoming-call-count-badge"></span>
+                </div>
+                <div id="incomingCallPatientCards" class="incoming-call-cards"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Global Patient Form Modal (used by both Patient and Appointment tabs) -->
     <div id="patientFormModal" class="bottom-sheet hidden">
         <div class="bottom-sheet-backdrop"></div>

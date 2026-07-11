@@ -273,6 +273,9 @@ app.get('/api/patients/search', async (req, res) => {
 
 // --- INCOMING CALL PAGE (for Android Automate integration) ---
 app.get('/incoming-call', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     try {
         const { phone } = req.query;
         if (!phone) {
@@ -284,14 +287,19 @@ app.get('/incoming-call', async (req, res) => {
         const count = patients.length;
         const baseUrl = `${req.protocol}://${req.get('host')}`;
 
+        const encodedPhone = encodeURIComponent(cleanPhone);
+        const safePhone = escapeHtml(cleanPhone);
+
         let patientCards = '';
         if (count === 0) {
-            patientCards = `<div style="text-align:center;padding:40px 20px;color:#6b7280;"><p style="font-size:1.2rem;">😕 No patients found with phone <strong>${escapeHtml(cleanPhone)}</strong></p></div>`;
+            patientCards = `<div style="text-align:center;padding:40px 20px;color:#6b7280;"><p style="font-size:1.2rem;">😕 No patients found with phone <strong>${safePhone}</strong></p></div>`;
         } else {
             patients.forEach(p => {
                 const phoneDisplay = p.phone || '-';
                 const ageDisplay = p.age || '-';
                 const sexDisplay = p.sex || '-';
+                const encPatientId = encodeURIComponent(p.id);
+                const encPatientName = encodeURIComponent(p.name);
                 patientCards += `
                     <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
                         <div style="display:flex;justify-content:space-between;align-items:start;">
@@ -299,13 +307,17 @@ app.get('/incoming-call', async (req, res) => {
                                 <h3 style="margin:0 0 4px;font-size:1.1rem;color:#111827;">${escapeHtml(p.name)}</h3>
                                 <p style="margin:2px 0;color:#6b7280;font-size:0.9rem;">🆔 ${escapeHtml(p.id)}</p>
                             </div>
-                            <a href="${baseUrl}/?patientId=${encodeURIComponent(p.id)}&phone=${encodeURIComponent(cleanPhone)}" style="background:#2563eb;color:white;text-decoration:none;padding:8px 16px;border-radius:8px;font-size:0.85rem;white-space:nowrap;">👤 Open Patient</a>
+                            <a href="${baseUrl}/?patientId=${encPatientId}&phone=${encodedPhone}" style="background:#2563eb;color:white;text-decoration:none;padding:8px 16px;border-radius:8px;font-size:0.85rem;white-space:nowrap;">👤 Open Patient</a>
                         </div>
                         <div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap;">
                             <span style="font-size:0.85rem;color:#374151;">📞 ${escapeHtml(phoneDisplay)}</span>
                             <span style="font-size:0.85rem;color:#374151;">🎂 ${escapeHtml(ageDisplay)}</span>
                             <span style="font-size:0.85rem;color:#374151;">⚤ ${escapeHtml(sexDisplay)}</span>
                             <span style="font-size:0.85rem;color:#374151;">📍 ${escapeHtml(p.address || '-')}</span>
+                        </div>
+                        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+                            <a href="${baseUrl}/?patientId=${encPatientId}&patientName=${encPatientName}&phone=${encodedPhone}&action=createAppointment" class="card-action-btn" style="background:#059669;">📅 Create Appointment</a>
+                            <a href="${baseUrl}/?patientName=${encPatientName}&phone=${encodedPhone}&action=openLabTracker" class="card-action-btn" style="background:#7c3aed;">🔬 Lab Tracker</a>
                         </div>
                     </div>`;
             });
@@ -317,6 +329,7 @@ app.get('/incoming-call', async (req, res) => {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Incoming Call - Patient Search</title>
+    <script src="/indexeddb.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; padding: 16px; color: #111827; }
@@ -325,20 +338,226 @@ app.get('/incoming-call', async (req, res) => {
         .header p { font-size: 0.9rem; opacity: 0.9; }
         .count-badge { display: inline-block; background: #dbeafe; color: #1e40af; padding: 4px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; margin-bottom: 12px; }
         .footer { text-align: center; margin-top: 20px; padding: 16px; color: #9ca3af; font-size: 0.8rem; }
+
+        .action-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; justify-content: center; }
+        .action-btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px; border: none; border-radius: 10px; font-size: 0.9rem; font-weight: 600; cursor: pointer; text-decoration: none; transition: opacity 0.2s; }
+        .action-btn:hover { opacity: 0.85; }
+        .action-btn.primary { background: #059669; color: white; }
+        .action-btn.secondary { background: #4b5563; color: white; }
+        .action-btn.info { background: #7c3aed; color: white; }
+        a.card-action-btn { display: inline-flex; align-items: center; gap: 4px; color: white; text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 500; white-space: nowrap; }
+
+        .add-phone-section { background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); display: none; }
+        .add-phone-section.visible { display: block; }
+        .add-phone-section h3 { font-size: 1rem; margin-bottom: 8px; color: #374151; }
+        .add-phone-search-wrap { display: flex; gap: 8px; }
+        .add-phone-search-wrap input { flex: 1; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.9rem; outline: none; }
+        .add-phone-search-wrap input:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.2); }
+        .add-phone-results { margin-top: 8px; max-height: 300px; overflow-y: auto; }
+        .patient-result-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 6px; background: #f9fafb; }
+        .patient-result-item .info { flex: 1; }
+        .patient-result-item .name { font-weight: 600; color: #111827; }
+        .patient-result-item .detail { font-size: 0.8rem; color: #6b7280; }
+        .patient-result-item .add-btn { background: #2563eb; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: 500; white-space: nowrap; }
+        .patient-result-item .add-btn:disabled { background: #9ca3af; cursor: not-allowed; }
+        .patient-result-item .added-badge { background: #d1fae5; color: #065f46; padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 500; }
+
+        .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1f2937; color: white; padding: 12px 24px; border-radius: 10px; font-size: 0.9rem; z-index: 9999; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+        .toast.show { opacity: 1; }
+
+        .loading-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #e5e7eb; border-top-color: #2563eb; border-radius: 50%; animation: spin 0.6s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .no-results-sm { padding: 20px; text-align: center; color: #9ca3af; font-size: 0.9rem; }
     </style>
 </head>
 <body>
+    <div id="toast" class="toast"></div>
+
     <div class="header">
         <h1>📞 Incoming Call</h1>
-        <p>Phone: <strong>${escapeHtml(cleanPhone)}</strong></p>
+        <p>Phone: <strong>${safePhone}</strong></p>
     </div>
+
+    <div class="action-toolbar">
+        <button class="action-btn primary" onclick="createNewPatient()">➕ Create New Patient</button>
+        <button class="action-btn secondary" onclick="toggleAddPhoneSearch()">📞 Add Phone to Existing</button>
+        <a href="${baseUrl}/" class="action-btn secondary" style="background:#2563eb;">🏥 Open Clinic App</a>
+    </div>
+
+    <div id="addPhoneSection" class="add-phone-section">
+        <h3>📞 Add Phone to Existing Patient</h3>
+        <p style="font-size:0.85rem;color:#6b7280;margin-bottom:10px;">Search for a patient by name to add <strong>${safePhone}</strong> as an additional phone number.</p>
+        <div class="add-phone-search-wrap">
+            <input type="text" id="patientNameSearch" placeholder="Type patient name to search..." oninput="searchPatientsByName(this.value)" autocomplete="off">
+            <button onclick="document.getElementById('patientNameSearch').value='';document.getElementById('patientNameResults').innerHTML='';" style="padding:8px 14px;border:1px solid #d1d5db;border-radius:8px;background:white;cursor:pointer;font-size:1.1rem;">✕</button>
+        </div>
+        <div id="patientNameResults" class="add-phone-results"></div>
+        <div id="addPhoneLoading" style="display:none;text-align:center;padding:16px;"><span class="loading-spinner"></span> Loading patients...</div>
+    </div>
+
     <div style="text-align:center;">
         <span class="count-badge">${count} patient${count !== 1 ? 's' : ''} found</span>
     </div>
     ${patientCards}
     <div class="footer">
-        <a href="${baseUrl}/" style="color:#2563eb;text-decoration:none;">← Open TWOK Clinic App</a>
+        <a href="${baseUrl}/?phone=${encodedPhone}&action=incomingCall" style="color:#2563eb;text-decoration:none;">← Open in Clinic App</a>
     </div>
+
+    <script>
+        var CALLER_PHONE = '${safePhone}';
+        var CALLER_PHONE_ENC = '${encodedPhone}';
+        var BASE_URL = '${baseUrl}';
+        var dbPatients = [];
+        var dbLoaded = false;
+
+        function showToast(msg) {
+            var t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            clearTimeout(t._hide);
+            t._hide = setTimeout(function() { t.classList.remove('show'); }, 2500);
+        }
+
+        function copyToClipboard(text) {
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(function() {
+                    showToast('📋 Copied: ' + text);
+                });
+            } else {
+                var ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast('📋 Copied: ' + text);
+            }
+        }
+
+        function createNewPatient() {
+            copyToClipboard(CALLER_PHONE);
+            window.open(BASE_URL + '/?phone=' + CALLER_PHONE_ENC + '&action=newPatient', '_blank');
+        }
+
+        function toggleAddPhoneSearch() {
+            var section = document.getElementById('addPhoneSection');
+            var isVisible = section.classList.toggle('visible');
+            if (isVisible && !dbLoaded) {
+                loadPatientDatabase();
+            }
+            if (isVisible) {
+                setTimeout(function() {
+                    document.getElementById('patientNameSearch').focus();
+                }, 200);
+            }
+        }
+
+        async function loadPatientDatabase() {
+            var loadingEl = document.getElementById('addPhoneLoading');
+            loadingEl.style.display = 'block';
+            try {
+                if (typeof TWOKDB !== 'undefined' && TWOKDB.getAll) {
+                    dbPatients = await TWOKDB.getAll(TWOKDB.STORES.PATIENTS);
+                    if (!Array.isArray(dbPatients)) dbPatients = [];
+                    dbLoaded = true;
+                    console.log('[IncomingCall] Loaded', dbPatients.length, 'patients from IndexedDB');
+                } else {
+                    console.warn('[IncomingCall] TWOKDB not available');
+                }
+            } catch (e) {
+                console.error('[IncomingCall] Failed to load patients:', e);
+            }
+            loadingEl.style.display = 'none';
+        }
+
+        function searchPatientsByName(query) {
+            var resultsEl = document.getElementById('patientNameResults');
+            var term = (query || '').toLowerCase().trim();
+
+            if (!term || !dbLoaded || dbPatients.length === 0) {
+                if (!dbLoaded && term) {
+                    resultsEl.innerHTML = '<div class="no-results-sm">Loading patients from database...</div>';
+                } else if (!term) {
+                    resultsEl.innerHTML = '';
+                } else {
+                    resultsEl.innerHTML = '<div class="no-results-sm">No patients found matching "' + escapeHtml_(term) + '"</div>';
+                }
+                return;
+            }
+
+            var matches = dbPatients.filter(function(p) {
+                return (p.name || '').toLowerCase().includes(term);
+            }).slice(0, 15);
+
+            if (matches.length === 0) {
+                resultsEl.innerHTML = '<div class="no-results-sm">No patients found matching "' + escapeHtml_(term) + '"</div>';
+                return;
+            }
+
+            resultsEl.innerHTML = matches.map(function(p) {
+                var existingPhones = (p.phone || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+                var phoneAlreadyAdded = existingPhones.some(function(ph) {
+                    return normalizePhone_(ph) === normalizePhone_(CALLER_PHONE);
+                });
+                var statusHtml = phoneAlreadyAdded
+                    ? '<span class="added-badge">✓ Already Added</span>'
+                    : '<button class="add-btn" onclick="addPhoneToPatient(\\'' + p.id.replace(/'/g, "\\\\'") + '\\', this)">+ Add Phone</button>';
+                return '<div class="patient-result-item">' +
+                    '<div class="info">' +
+                        '<div class="name">' + escapeHtml_(p.name) + '</div>' +
+                        '<div class="detail">🆔 ' + escapeHtml_(p.id) + ' &middot; 📞 ' + escapeHtml_(p.phone || '-') + '</div>' +
+                    '</div>' +
+                    statusHtml +
+                '</div>';
+            }).join('');
+        }
+
+        async function addPhoneToPatient(patientId, btn) {
+            btn.disabled = true;
+            btn.textContent = '...';
+
+            try {
+                var patient = dbPatients.find(function(p) { return p.id === patientId; });
+                if (!patient) {
+                    showToast('Patient not found');
+                    return;
+                }
+
+                var existingPhones = (patient.phone || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+                if (existingPhones.some(function(ph) { return normalizePhone_(ph) === normalizePhone_(CALLER_PHONE); })) {
+                    showToast('Phone number already exists for ' + patient.name);
+                    btn.outerHTML = '<span class="added-badge">✓ Already Added</span>';
+                    return;
+                }
+
+                existingPhones.push(CALLER_PHONE);
+                patient.phone = existingPhones.join(', ');
+
+                await TWOKDB.put(TWOKDB.STORES.PATIENTS, patient);
+
+                var idx = dbPatients.findIndex(function(p) { return p.id === patientId; });
+                if (idx >= 0) dbPatients[idx] = patient;
+
+                showToast('✅ Phone added to ' + patient.name);
+                btn.outerHTML = '<span class="added-badge">✓ Added</span>';
+            } catch (e) {
+                console.error('[IncomingCall] Error adding phone:', e);
+                showToast('❌ Error adding phone: ' + e.message);
+                btn.disabled = false;
+                btn.textContent = '+ Add Phone';
+            }
+        }
+
+        function normalizePhone_(ph) {
+            return String(ph).replace(/[\\s\\-\\(\\)\\+]/g, '');
+        }
+
+        function escapeHtml_(text) {
+            if (!text) return '';
+            return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+    </script>
 </body>
 </html>`);
     } catch (error) {
