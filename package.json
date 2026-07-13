@@ -17,6 +17,7 @@
     "html5-qrcode": "^2.3.8",
     "http-server": "^14.1.1",
     "jsbarcode": "^3.12.3",
+    "web-push": "^3.6.7",
     "ws": "^8.14.2"
   },
   "devDependencies": {
