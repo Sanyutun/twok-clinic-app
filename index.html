@@ -2155,6 +2155,26 @@
                 </div>
             </div>
         </section>
+
+        <!-- Section 5: Incoming Call Notification Settings -->
+        <section class="settings-card">
+            <div class="settings-card-header">
+                <h3>📞 Incoming Call Notifications</h3>
+                <p class="settings-card-description">Show overlay when Android Automate detects an incoming phone call.</p>
+            </div>
+            <div class="settings-card-body">
+                <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;">
+                    <div>
+                        <label style="font-weight:600;cursor:pointer;">Show incoming call overlay</label>
+                        <small class="form-text text-muted" style="display:block;margin-top:4px;">When enabled, an overlay will appear on all connected web clients when a call comes in.</small>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="incomingCallNotificationToggle" checked onchange="incomingCallNotificationToggleChanged(this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+        </section>
     </section>
 
     <!-- Lab Form Modal -->
@@ -2338,15 +2358,131 @@
                         loadAllData();
                     }
                 });
+
+                // Listen for incoming call events from WebSocket
+                twokClinicApp.on('incoming-call', (data) => {
+                    const phone = data?.data?.phone || data?.phone;
+                    if (!phone) return;
+                    const enabled = window.isIncomingCallNotificationEnabled ? window.isIncomingCallNotificationEnabled() : true;
+                    if (!enabled) return;
+                    if (typeof window.incomingCallOpen === 'function') {
+                        window.incomingCallOpen(phone);
+                    }
+                });
                 
                 // Initial data load
                 if (window.loadAllData) {
                     await loadAllData();
                 }
+
+                // Set up push notifications (PWA)
+                setupPushNotifications();
             } catch (error) {
                 console.error('[App] Initialization failed:', error);
             }
         });
+
+        // Listen for INCOMING_CALL messages from service worker
+        if (navigator.serviceWorker) {
+            navigator.serviceWorker.addEventListener('message', (event) => {
+                const { type, phone } = event.data || {};
+                if (type === 'INCOMING_CALL' && phone) {
+                    const enabled = window.isIncomingCallNotificationEnabled ? window.isIncomingCallNotificationEnabled() : true;
+                    if (enabled && typeof window.incomingCallOpen === 'function') {
+                        window.incomingCallOpen(phone);
+                    }
+                }
+            });
+        }
+
+        // Set up push notification subscription
+        async function setupPushNotifications() {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                console.log('[Push] Not supported');
+                return;
+            }
+
+            try {
+                const reg = await navigator.serviceWorker.ready;
+
+                // Check existing subscription
+                const existingSub = await reg.pushManager.getSubscription();
+                if (existingSub) {
+                    // Already subscribed — re-send with current enabled state
+                    try {
+                        const toggle = document.getElementById('incomingCallNotificationToggle');
+                        const enabled = toggle ? toggle.checked : true;
+                        const subData = existingSub.toJSON();
+                        subData.enabled = enabled;
+                        await fetch('/api/push/subscribe', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(subData)
+                        });
+                    } catch (e) {
+                        // Server may be down, ignore
+                    }
+                    return;
+                }
+
+                // Request permission
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    console.log('[Push] Permission denied');
+                    return;
+                }
+
+                // Fetch VAPID public key from server
+                const keyRes = await fetch('/api/push/vapid-public-key');
+                const { publicKey } = await keyRes.json();
+                if (!publicKey) {
+                    console.log('[Push] No VAPID key from server');
+                    return;
+                }
+
+                // Subscribe
+                const subscription = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(publicKey)
+                });
+
+                // Check current toggle state
+                const toggle = document.getElementById('incomingCallNotificationToggle');
+                const initiallyEnabled = toggle ? toggle.checked : true;
+
+                // Send subscription to server with enabled state
+                const subData = subscription.toJSON();
+                subData.enabled = initiallyEnabled;
+                await fetch('/api/push/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(subData)
+                });
+
+                // Store endpoint locally so toggle can update preference
+                try {
+                    localStorage.setItem('twok_clinic_push_endpoint', subscription.endpoint);
+                } catch (e) {}
+
+                console.log('[Push] Subscribed successfully');
+            } catch (error) {
+                console.error('[Push] Setup failed:', error);
+            }
+        }
+
+        // Convert base64 to Uint8Array for VAPID key
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding)
+                .replace(/-/g, '+')
+                .replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+        }
         
         // Update sync status UI
         function updateSyncStatusUI(event, data) {

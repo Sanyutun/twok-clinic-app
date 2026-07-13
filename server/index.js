@@ -9,6 +9,7 @@ const http = require('http');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const { createClient } = require('@supabase/supabase-js');
+const webpush = require('web-push');
 require('dotenv').config();
 
 const app = express();
@@ -26,6 +27,23 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// ==========================================
+// WEB PUSH (VAPID)
+// ==========================================
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY || '';
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || '';
+const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:admin@twokclinic.com';
+
+if (vapidPublicKey && vapidPrivateKey) {
+    webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
+    console.log('🔔 Web Push configured');
+} else {
+    console.warn('⚠️  VAPID keys not set — push notifications disabled');
+}
+
+// In-memory push subscriptions (survives restarts only if re-subscribed)
+const pushSubscriptions = [];
 
 // ==========================================
 // HELPERS
@@ -176,6 +194,7 @@ app.get('/health', async (req, res) => {
         status: 'ok', 
         timestamp: new Date().toISOString(),
         clients: wsClients.size,
+        pushSubscriptions: pushSubscriptions.length,
         supabase: supabaseStatus,
         environment: process.env.NODE_ENV || 'development',
         nodeVersion: process.version
@@ -270,6 +289,143 @@ app.get('/api/patients/search', async (req, res) => {
         res.status(500).json({ error: error.message, success: false });
     }
 });
+
+// --- INCOMING CALL API (for Android Automate + WebSocket broadcast) ---
+app.get('/api/incoming-call', async (req, res) => {
+    try {
+        const { phone } = req.query;
+        if (!phone) {
+            return res.status(400).json({ error: 'Phone query parameter is required', success: false });
+        }
+        const cleanPhone = normalizePhone(phone.trim());
+        const patients = await searchPatientsByPhone(supabase, cleanPhone);
+
+        const payload = {
+            phone: cleanPhone,
+            patients,
+            timestamp: new Date().toISOString()
+        };
+
+        // Broadcast to all connected web clients via WebSocket
+        broadcast('incoming_call', payload);
+
+        // Send push notification to all subscribed devices
+        sendPushNotifications(cleanPhone, patients).catch(err => {
+            console.error('[Push] Batch send error:', err.message);
+        });
+
+        res.json({ success: true, count: patients.length, patients });
+    } catch (error) {
+        console.error('[Incoming Call API] Error:', error.message);
+        res.status(500).json({ error: error.message, success: false });
+    }
+});
+
+// --- PUSH SUBSCRIPTION ENDPOINTS ---
+app.get('/api/push/vapid-public-key', (req, res) => {
+    res.json({ publicKey: vapidPublicKey });
+});
+
+app.post('/api/push/subscribe', (req, res) => {
+    try {
+        const subscription = req.body;
+        if (!subscription || !subscription.endpoint) {
+            return res.status(400).json({ error: 'Invalid subscription', success: false });
+        }
+        const existing = pushSubscriptions.find(s => s.endpoint === subscription.endpoint);
+        if (existing) {
+            existing.enabled = subscription.enabled !== false;
+        } else {
+            pushSubscriptions.push({
+                endpoint: subscription.endpoint,
+                keys: subscription.keys || {},
+                enabled: subscription.enabled !== false
+            });
+            console.log(`[Push] Subscribed (total: ${pushSubscriptions.length})`);
+        }
+        res.json({ success: true });
+    } catch (error) {
+        console.error('[Push] Subscribe error:', error.message);
+        res.status(500).json({ error: error.message, success: false });
+    }
+});
+
+app.post('/api/push/unsubscribe', (req, res) => {
+    try {
+        const { endpoint } = req.body;
+        if (!endpoint) {
+            return res.status(400).json({ error: 'Missing endpoint', success: false });
+        }
+        const idx = pushSubscriptions.findIndex(s => s.endpoint === endpoint);
+        if (idx !== -1) {
+            pushSubscriptions.splice(idx, 1);
+            console.log(`[Push] Unsubscribed (total: ${pushSubscriptions.length})`);
+        }
+        res.json({ success: true });
+    } catch (error) {
+        console.error('[Push] Unsubscribe error:', error.message);
+        res.status(500).json({ error: error.message, success: false });
+    }
+});
+
+app.post('/api/push/update-preference', (req, res) => {
+    try {
+        const { endpoint, enabled } = req.body;
+        if (!endpoint) {
+            return res.status(400).json({ error: 'Missing endpoint', success: false });
+        }
+        const sub = pushSubscriptions.find(s => s.endpoint === endpoint);
+        if (sub) {
+            sub.enabled = enabled !== false;
+            console.log(`[Push] Preference updated for ${endpoint.slice(0, 40)}... enabled=${sub.enabled}`);
+        }
+        res.json({ success: true });
+    } catch (error) {
+        console.error('[Push] Update preference error:', error.message);
+        res.status(500).json({ error: error.message, success: false });
+    }
+});
+
+// --- PUSH NOTIFICATION HELPER ---
+async function sendPushNotifications(phone, patients) {
+    if (!vapidPublicKey || !vapidPrivateKey || pushSubscriptions.length === 0) return;
+
+    // Only send to subscriptions with enabled !== false
+    const activeSubs = pushSubscriptions.filter(s => s.enabled !== false);
+    if (activeSubs.length === 0) return;
+
+    const patientNames = patients.slice(0, 3).map(p => p.name).join(', ');
+    const count = patients.length;
+    const body = count > 0
+        ? `📞 Call from ${phone} — ${count} patient${count > 1 ? 's' : ''} found: ${patientNames}`
+        : `📞 Call from ${phone} — No matching patients`;
+
+    const payload = JSON.stringify({
+        title: '📞 Incoming Call',
+        body,
+        phone,
+        url: `/?phone=${encodeURIComponent(phone)}&action=incomingCall`,
+        timestamp: new Date().toISOString()
+    });
+
+    const results = await Promise.allSettled(
+        activeSubs.map(sub => {
+            const subObj = { endpoint: sub.endpoint, keys: sub.keys || {} };
+            return webpush.sendNotification(subObj, payload)
+                .catch(err => {
+                    if (err.statusCode === 410 || err.statusCode === 404) {
+                        const idx = pushSubscriptions.indexOf(sub);
+                        if (idx !== -1) pushSubscriptions.splice(idx, 1);
+                    }
+                    throw err;
+                });
+        })
+    );
+
+    const sent = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
+    console.log(`[Push] Sent to ${sent}/${activeSubs.length} active devices (${failed} failed)`);
+}
 
 // --- INCOMING CALL PAGE (for Android Automate integration) ---
 app.get('/incoming-call', async (req, res) => {

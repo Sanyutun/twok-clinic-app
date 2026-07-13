@@ -430,10 +430,30 @@ class DataLayer {
             if (window[arrayName] && Array.isArray(window[arrayName])) {
                 const flattenedRecords = sanitizedRecords.map(r => this.flattenRecordIfNeeded(storeName, r));
                 for (const record of flattenedRecords) {
-                    const existingIndex = window[arrayName].findIndex(item => {
+                    let existingIndex = window[arrayName].findIndex(item => {
                         const itemId = item.id || item.AppointmentID || item.PatientID || item.DoctorID || item.InstructionID || item.ExpenseID || item.LabID || item.labId;
                         return itemId === record.id;
                     });
+
+                    // Fallback: field-based match for appointments
+                    if (existingIndex < 0 && storeName === 'appointments') {
+                        existingIndex = window[arrayName].findIndex(item => {
+                            const pi = record.patientId || record.patient_id;
+                            const ai = record.patientName || record.patient_name;
+                            const at = record.appointmentTime || record.appointment_time;
+                            const dn = record.doctorName || record.doctor_name;
+                            if (!at || !dn) return false;
+                            const itemAt = item.appointmentTime || item.appointment_time;
+                            const itemDn = item.doctorName || item.doctor_name;
+                            const itemPi = item.patientId || item.patient_id;
+                            const itemAi = item.patientName || item.patient_name;
+                            if (itemAt !== at || itemDn !== dn) return false;
+                            if (pi && itemPi && pi == itemPi) return true;
+                            if (ai && itemAi && ai == itemAi) return true;
+                            return false;
+                        });
+                    }
+
                     if (existingIndex >= 0) {
                         window[arrayName][existingIndex] = record;
                     } else {
@@ -837,10 +857,31 @@ class DataLayer {
                 const arrayName = this.tableToArrayName(table);
                 if (window[arrayName]) {
                     const flattenedRecord = this.flattenRecordIfNeeded(table, sanitizedData);
-                    const existingIndex = window[arrayName].findIndex(item => {
+                    let existingIndex = window[arrayName].findIndex(item => {
                         const itemId = item.id || item.AppointmentID || item.PatientID || item.DoctorID || item.InstructionID || item.ExpenseID || item.LabID || item.labId || (typeof item === 'string' ? item : null);
                         return itemId === (id || sanitizedData.id);
                     });
+
+                    // Fallback: field-based match for appointments
+                    if (existingIndex < 0 && table === 'appointments') {
+                        const sr = sanitizedData;
+                        existingIndex = window[arrayName].findIndex(item => {
+                            const pi = sr.patientId || sr.patient_id;
+                            const ai = sr.patientName || sr.patient_name;
+                            const at = sr.appointmentTime || sr.appointment_time;
+                            const dn = sr.doctorName || sr.doctor_name;
+                            if (!at || !dn) return false;
+                            const itemAt = item.appointmentTime || item.appointment_time;
+                            const itemDn = item.doctorName || item.doctor_name;
+                            const itemPi = item.patientId || item.patient_id;
+                            const itemAi = item.patientName || item.patient_name;
+                            if (itemAt !== at || itemDn !== dn) return false;
+                            if (pi && itemPi && pi == itemPi) return true;
+                            if (ai && itemAi && ai == itemAi) return true;
+                            return false;
+                        });
+                    }
+
                     if (existingIndex >= 0) {
                         window[arrayName][existingIndex] = flattenedRecord;
                     } else {
@@ -1161,13 +1202,33 @@ class DataLayer {
         const arrayName = this.tableToArrayName(normalizedTable);
         if (window[arrayName]) {
             const flattenedRecord = this.flattenRecordIfNeeded(normalizedTable, frontendRecord);
-            const index = window[arrayName].findIndex(item => {
+            let index = window[arrayName].findIndex(item => {
                 if (typeof item === 'string') return item == recordId;
                 const itemId = item.id || item.labId || item.value || 
                              item.ExpenseID || item.PatientID || item.DoctorID || 
                              item.AppointmentID || item.InstructionID || item.LabID;
                 return itemId == recordId;
             });
+
+            // Fallback: field-based match when ID lookup fails (e.g. locally-generated
+            // string ID vs Supabase numeric ID mismatch)
+            if (index < 0 && eventType !== 'delete' && normalizedTable === 'appointments') {
+                index = window[arrayName].findIndex(item => {
+                    const pi = flattenedRecord.patientId || flattenedRecord.patient_id;
+                    const ai = flattenedRecord.patientName || flattenedRecord.patient_name;
+                    const at = flattenedRecord.appointmentTime || flattenedRecord.appointment_time;
+                    const dn = flattenedRecord.doctorName || flattenedRecord.doctor_name;
+                    if (!at || !dn) return false;
+                    const itemAt = item.appointmentTime || item.appointment_time;
+                    const itemDn = item.doctorName || item.doctor_name;
+                    const itemPi = item.patientId || item.patient_id;
+                    const itemAi = item.patientName || item.patient_name;
+                    if (itemAt !== at || itemDn !== dn) return false;
+                    if (pi && itemPi && pi == itemPi) return true;
+                    if (ai && itemAi && ai == itemAi) return true;
+                    return false;
+                });
+            }
 
             if (eventType === 'delete') {
                 if (index >= 0) window[arrayName].splice(index, 1);

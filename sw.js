@@ -347,19 +347,22 @@ async function syncClinicData() {
 
 // Push notifications
 self.addEventListener('push', (event) => {
-    console.log('[Service Worker] Push received:', event);
-    
     if (event.data) {
         const data = event.data.json();
+        const isIncomingCall = data.phone !== undefined;
+        
         const options = {
             body: data.body || 'New notification from TWOK Clinic',
             icon: '/icons/icon-192x192.png',
             badge: '/icons/icon-72x72.png',
-            vibrate: [100, 50, 100],
+            vibrate: isIncomingCall ? [200, 100, 200, 100, 200] : [100, 50, 100],
+            requireInteraction: isIncomingCall,
+            tag: isIncomingCall ? 'incoming-call' : 'default',
             data: {
                 dateOfArrival: Date.now(),
-                primaryKey: 1,
-                url: data.url || '/'
+                primaryKey: isIncomingCall ? 2 : 1,
+                url: data.url || '/',
+                phone: data.phone || null
             },
             actions: [
                 {
@@ -381,7 +384,6 @@ self.addEventListener('push', (event) => {
 
 // Handle notification click
 self.addEventListener('notificationclick', (event) => {
-    console.log('[Service Worker] Notification click:', event.action);
     event.notification.close();
 
     if (event.action === 'dismiss') {
@@ -392,10 +394,25 @@ self.addEventListener('notificationclick', (event) => {
         clients.matchAll({ type: 'window', includeUncontrolled: true })
             .then((clientList) => {
                 const url = event.notification.data?.url || '/';
+                const phone = event.notification.data?.phone || null;
                 
-                // Focus existing window if available
+                // Check if there's already a visible client
                 for (const client of clientList) {
-                    if (client.url === url && 'focus' in client) {
+                    if (client.visibilityState === 'visible' && 'focus' in client) {
+                        // Send message to existing client about the incoming call
+                        if (phone && client.postMessage) {
+                            client.postMessage({ type: 'INCOMING_CALL', phone });
+                        }
+                        return client.focus();
+                    }
+                }
+                
+                // Check for any window client
+                for (const client of clientList) {
+                    if ('focus' in client) {
+                        if (phone && client.postMessage) {
+                            client.postMessage({ type: 'INCOMING_CALL', phone });
+                        }
                         return client.focus();
                     }
                 }

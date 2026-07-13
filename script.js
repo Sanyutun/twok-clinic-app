@@ -981,6 +981,9 @@ async function init() {
     // Load Queue settings from localStorage
     loadQueueSettings();
     
+    // Load incoming call notification setting
+    loadIncomingCallNotificationSetting();
+    
     renderAddressList();
     renderSpecialityList();
     renderHospitalList();
@@ -3328,8 +3331,9 @@ function renderSingleAppointmentTable(data, tableBodyEl, tableEl, emptyMsgEl, pa
         const nextLocked = data.filter(a => a.isNext && a.status !== 'In Consult');
         const rest = data.filter(a => a.status !== 'In Consult' && !a.isNext);
         const emergency = rest.filter(a => a.bookingType === 'Emergency');
-        const investigation = rest.filter(a => a.status === 'Investigation');
         const echoReady = rest.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
+        const echoWaiting = rest.filter(a => a.bookingType === 'Echo Urgent' && a.waitingTurns > 0);
+        const investigation = rest.filter(a => a.status === 'Investigation' && a.bookingType !== 'Echo Urgent');
         const arrivedNoPenalty = rest.filter(a =>
             a.status === 'Arrived' && (!a.penaltyTurns || a.penaltyTurns <= 0) && a.bookingType !== 'Echo Urgent'
         );
@@ -3343,10 +3347,9 @@ function renderSingleAppointmentTable(data, tableBodyEl, tableEl, emptyMsgEl, pa
                 if (ai < arrivedNoPenalty.length) readyGroup.push(arrivedNoPenalty[ai++]);
             }
         }
-        const arrivedPenalty = rest.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0);
-        const echoWaiting = rest.filter(a => a.bookingType === 'Echo Urgent' && a.waitingTurns > 0);
-        const notArrived = rest.filter(a => a.status === 'Booked' || a.status === 'Noted');
-        const cancelledPostponed = rest.filter(a => a.status === 'Cancelled' || a.status === 'Postpone');
+        const arrivedPenalty = rest.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0 && a.bookingType !== 'Echo Urgent');
+        const notArrived = rest.filter(a => (a.status === 'Booked' || a.status === 'Noted') && a.bookingType !== 'Echo Urgent');
+        const cancelledPostponed = rest.filter(a => (a.status === 'Cancelled' || a.status === 'Postpone') && a.bookingType !== 'Echo Urgent');
         const otherStatuses = rest.filter(a =>
             !emergency.includes(a) && !investigation.includes(a) &&
             !echoReady.includes(a) && !arrivedNoPenalty.includes(a) &&
@@ -4121,10 +4124,11 @@ function sortAppointmentsForQueue(appts) {
     const rest = arr.filter(a => a.status !== 'In Consult' && !a.isNext);
 
     const emergency = rest.filter(a => a.bookingType === 'Emergency');
-    const investigation = rest.filter(a => a.status === 'Investigation');
+    const echoReady = rest.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
+    const echoWaiting = rest.filter(a => a.bookingType === 'Echo Urgent' && a.waitingTurns > 0);
+    const investigation = rest.filter(a => a.status === 'Investigation' && a.bookingType !== 'Echo Urgent');
 
     // Echo Urgent (ready) + Arrived (no penalty) — zipper merge
-    const echoReady = rest.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
     const arrivedNoPenalty = rest.filter(a =>
         a.status === 'Arrived' && (!a.penaltyTurns || a.penaltyTurns <= 0) && a.bookingType !== 'Echo Urgent'
     );
@@ -4139,10 +4143,9 @@ function sortAppointmentsForQueue(appts) {
         }
     }
 
-    const arrivedPenalty = rest.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0);
-    const echoWaiting = rest.filter(a => a.bookingType === 'Echo Urgent' && a.waitingTurns > 0);
-    const notArrived = rest.filter(a => a.status === 'Booked' || a.status === 'Noted');
-    const cancelledPostponed = rest.filter(a => a.status === 'Cancelled' || a.status === 'Postpone');
+    const arrivedPenalty = rest.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0 && a.bookingType !== 'Echo Urgent');
+    const notArrived = rest.filter(a => (a.status === 'Booked' || a.status === 'Noted') && a.bookingType !== 'Echo Urgent');
+    const cancelledPostponed = rest.filter(a => (a.status === 'Cancelled' || a.status === 'Postpone') && a.bookingType !== 'Echo Urgent');
     const otherStatuses = rest.filter(a =>
         !emergency.includes(a) && !investigation.includes(a) &&
         !echoReady.includes(a) && !arrivedNoPenalty.includes(a) &&
@@ -11428,6 +11431,52 @@ window.addEventListener('offline', updateCalendarConnectionStatus);
 var incomingCallPhone = '';
 var incomingCallDbPatients = [];
 var incomingCallDbLoaded = false;
+
+// ==================== INCOMING CALL NOTIFICATION SETTING ====================
+var incomingCallNotificationEnabled = true;
+
+function loadIncomingCallNotificationSetting() {
+    try {
+        var stored = localStorage.getItem('twok_clinic_incoming_call_notification');
+        if (stored !== null) {
+            incomingCallNotificationEnabled = stored === 'true';
+        }
+        var toggle = document.getElementById('incomingCallNotificationToggle');
+        if (toggle) toggle.checked = incomingCallNotificationEnabled;
+    } catch (e) {
+        console.error('[IncomingCall] Error loading notification setting:', e);
+    }
+}
+
+function isIncomingCallNotificationEnabled() {
+    return incomingCallNotificationEnabled;
+}
+
+function incomingCallNotificationToggleChanged(checked) {
+    incomingCallNotificationEnabled = checked;
+    try {
+        localStorage.setItem('twok_clinic_incoming_call_notification', checked ? 'true' : 'false');
+    } catch (e) {
+        console.error('[IncomingCall] Error saving notification setting:', e);
+    }
+    // Update push preference on server
+    updatePushPreference(checked);
+}
+
+function updatePushPreference(enabled) {
+    var endpoint = null;
+    try {
+        endpoint = localStorage.getItem('twok_clinic_push_endpoint');
+    } catch (e) {}
+    if (!endpoint) return;
+    fetch('/api/push/update-preference', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: endpoint, enabled: enabled })
+    }).catch(function(err) {
+        console.error('[Push] Failed to update preference:', err);
+    });
+}
 
 function ensureIncomingCallOverlay() {
     if (document.getElementById('incomingCallOverlay')) return true;

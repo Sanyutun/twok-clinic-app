@@ -47,6 +47,10 @@ class TWOKClinicApp {
                 this.notifyListeners('appointment-update', data);
             });
 
+            websocketClient.on('incoming_call', (data) => {
+                this.notifyListeners('incoming-call', data);
+            });
+
             // Register service worker
             await this.registerServiceWorker();
 

@@ -846,10 +846,11 @@
             const eligible = appointments.filter(a => arrivedStatuses.includes(a.status));
 
             const emergency = eligible.filter(a => a.bookingType === 'Emergency');
-            const investigation = eligible.filter(a => a.status === 'Investigation');
+            const echoReady = eligible.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
+            const echoWaiting = eligible.filter(a => a.bookingType === 'Echo Urgent' && a.waitingTurns > 0);
+            const investigation = eligible.filter(a => a.status === 'Investigation' && a.bookingType !== 'Echo Urgent');
 
             // Echo Urgent (no waiting) + Arrived (no penalty) — zipper merge
-            const echoReady = eligible.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
             const arrivedNoPenalty = eligible.filter(a =>
                 a.status === 'Arrived' && (!a.penaltyTurns || a.penaltyTurns <= 0) && a.bookingType !== 'Echo Urgent'
             );
@@ -864,11 +865,8 @@
                 }
             }
 
-            const arrivedPenalty = eligible.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0);
+            const arrivedPenalty = eligible.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0 && a.bookingType !== 'Echo Urgent');
             sortByBN(arrivedPenalty);
-
-            const echoWaiting = eligible.filter(a => a.bookingType === 'Echo Urgent' && a.waitingTurns > 0);
-            sortByBN(echoWaiting);
 
             const sortedArrived = [...emergency, ...investigation, ...readyGroup, ...arrivedPenalty, ...echoWaiting];
 
@@ -941,10 +939,11 @@
             const eligible = appointments.filter(a => arrivedStatuses.includes(a.status));
 
             const emergency = eligible.filter(a => a.bookingType === 'Emergency');
-            const investigation = eligible.filter(a => a.status === 'Investigation');
+            const echoReady = eligible.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
+            const echoWaiting = eligible.filter(a => a.bookingType === 'Echo Urgent' && a.waitingTurns > 0);
+            const investigation = eligible.filter(a => a.status === 'Investigation' && a.bookingType !== 'Echo Urgent');
 
             // Echo Urgent (no waiting) + Arrived (no penalty) — zipper merge
-            const echoReady = eligible.filter(a => a.bookingType === 'Echo Urgent' && (!a.waitingTurns || a.waitingTurns <= 0));
             const arrivedNoPenalty = eligible.filter(a =>
                 a.status === 'Arrived' && (!a.penaltyTurns || a.penaltyTurns <= 0) && a.bookingType !== 'Echo Urgent'
             );
@@ -959,11 +958,8 @@
                 }
             }
 
-            const arrivedPenalty = eligible.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0);
+            const arrivedPenalty = eligible.filter(a => a.status === 'Arrived' && a.penaltyTurns > 0 && a.bookingType !== 'Echo Urgent');
             sortByBN(arrivedPenalty);
-
-            const echoWaiting = eligible.filter(a => a.bookingType === 'Echo Urgent' && a.waitingTurns > 0);
-            sortByBN(echoWaiting);
 
             const arrived = [...emergency, ...investigation, ...readyGroup, ...arrivedPenalty, ...echoWaiting];
 
