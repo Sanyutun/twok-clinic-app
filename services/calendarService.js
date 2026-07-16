@@ -277,8 +277,8 @@ class CalendarService {
                 bloodTestStatus[test] = patientLabStatus;
             });
 
-            // "After Results" instructions should always appear on "today" until they are completed or handled
-            const date = today;
+            // "After Results" instructions appear on "today" until contacted, then move to contacted date
+            const date = (inst.contacted && inst.contactedAt) ? inst.contactedAt.split('T')[0] : today;
             const doctorName = window.instructionService.getDoctorName(inst);
 
             if (!this.calendarEvents[date]) {
@@ -337,7 +337,6 @@ class CalendarService {
 
         // Collect all instructions without determinable dates
         const noDateInstructions = instructions.filter(inst => {
-            // Check if this instruction has NO determinable date
             let hasDate = false;
             if (inst.nextAppointmentDate && inst.nextAppointmentDate.trim() !== '') {
                 hasDate = true;
@@ -353,35 +352,43 @@ class CalendarService {
                 return;
             }
 
+            const isDoTestsBefore = (inst.otherInstruction || '').trim().toLowerCase() === 'do tests before';
+
+            // Use contacted date if checked, otherwise today
+            const targetDate = (inst.contacted && inst.contactedAt) ? inst.contactedAt.split('T')[0] : today;
+
             // Determine TODO reasons
             const reasons = [];
             
-            // Not After Results - check if follow-up date is missing
-            reasons.push('follow-up-no-date');
+            if (isDoTestsBefore) {
+                reasons.push('appointment-date-not-specified');
+            } else {
+                reasons.push('follow-up-no-date');
+            }
 
-            if (!this.calendarEvents[today]) {
-                this.calendarEvents[today] = {};
+            if (!this.calendarEvents[targetDate]) {
+                this.calendarEvents[targetDate] = {};
             }
 
             const doctorName = window.instructionService.getDoctorName(inst);
-            if (!this.calendarEvents[today][doctorName]) {
-                this.calendarEvents[today][doctorName] = {
+            if (!this.calendarEvents[targetDate][doctorName]) {
+                this.calendarEvents[targetDate][doctorName] = {
                     doctor: doctorName,
                     patients: [],
                     types: new Set()
                 };
             }
 
-            // Check if patient already has a TODO entry for today
-            const exists = this.calendarEvents[today][doctorName].patients.some(p =>
-                p.type === 'todo' && p.instruction.patientId === inst.patientId
+            // Check if instruction already has a TODO entry for target date
+            const exists = this.calendarEvents[targetDate][doctorName].patients.some(p =>
+                p.type === 'todo' && p.instruction.id === inst.id
             );
 
             if (!exists) {
                 const patientDisplay = window.instructionService.getPatientDisplayString(inst);
                 const testsToCheck = inst.selectedTests || [];
 
-                this.calendarEvents[today][doctorName].patients.push({
+                this.calendarEvents[targetDate][doctorName].patients.push({
                     type: 'todo',
                     todoReasons: reasons,
                     instruction: inst,
@@ -392,7 +399,7 @@ class CalendarService {
                     hasResults: false
                 });
 
-                this.calendarEvents[today][doctorName].types.add('todo');
+                this.calendarEvents[targetDate][doctorName].types.add('todo');
             }
         });
     }

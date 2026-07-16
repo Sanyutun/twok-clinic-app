@@ -434,6 +434,7 @@ const elements = {
     calCurrentMonthYear: document.getElementById('calCurrentMonthYear'),
     calFilterDoctor: document.getElementById('calFilterDoctor'),
     calFilterType: document.getElementById('calFilterType'),
+    calSearchInput: document.getElementById('calSearchInput'),
     calClearFilters: document.getElementById('calClearFilters'),
     calDaysGrid: document.getElementById('calDaysGrid'),
     calLoading: document.getElementById('calLoading'),
@@ -2372,11 +2373,13 @@ function searchPatients(searchTerm) {
         const age = String(p.age || '').toLowerCase();
         const phone = (p.phone || '').toLowerCase();
         const address = (p.address || '').toLowerCase();
+        const id = (p.id || '').toLowerCase();
         
-        return name.includes(term) || 
-               age.includes(term) || 
-               phone.includes(term) || 
-               address.includes(term);
+        return name === term || 
+               age === term || 
+               phone === term || 
+               address === term ||
+               id === term;
     });
     renderPatientTable(filtered);
     elements.patientNoResultsMessage.classList.toggle('hidden', filtered.length > 0);
@@ -4250,7 +4253,8 @@ function searchAppointments(searchTerm) {
             const pName = (a.patientName || '').toLowerCase();
             const dName = (a.doctorName || '').toLowerCase();
             const phone = (a.phone || '').toLowerCase();
-            return pName.includes(term) || dName.includes(term) || phone.includes(term);
+            const patientId = (a.patientId || '').toLowerCase();
+            return pName === term || dName === term || phone === term || patientId === term;
         });
     }
 
@@ -4653,7 +4657,8 @@ function renderInstructionTableWithSaved() {
     // Filter by search
     if (searchTerm) {
         allAppointments = allAppointments.filter(appt =>
-            (appt.patientName || '').toLowerCase().includes(searchTerm)
+            (appt.patientName || '').toLowerCase() === searchTerm ||
+            (appt.patientId || '').toLowerCase() === searchTerm
         );
     }
 
@@ -4698,7 +4703,13 @@ function renderInstructionTableWithSaved() {
     const paginatedData = allAppointments.slice(startIndex, startIndex + ITEMS_PER_PAGE);
 
     elements.instructionTableBody.innerHTML = paginatedData.map(appt => {
-        const appointmentInstructions = instructions.filter(inst => inst.appointmentId === appt.id);
+        const seenIds = new Set();
+        const appointmentInstructions = instructions.filter(inst => {
+            if (inst.appointmentId !== appt.id) return false;
+            if (seenIds.has(inst.id)) return false;
+            seenIds.add(inst.id);
+            return true;
+        });
         const hasInstructions = appointmentInstructions.length > 0;
         
         // Build instruction summary display
@@ -5033,7 +5044,8 @@ function editInstruction(instructionId) {
         a.id === inst.appointment_id || a.appointment_id === inst.appointment_id
     );
     if (!appt) {
-        showNotification('Appointment not found for this instruction', 'error');
+        showNotification('Appointment not found', 'error');
+        _savingInstruction = false;
         return;
     }
 
@@ -5103,6 +5115,7 @@ function editInstruction(instructionId) {
  */
 function closeInstructionFormPanel() {
     elements.instructionFormPanel.classList.add('hidden');
+    elements.instructAppointmentId.removeAttribute('data-edit-id');
     document.body.style.overflow = '';
 }
 
@@ -7774,8 +7787,16 @@ window.deleteVipNumber = deleteVipNumber;
 /**
  * Save instruction
  */
+let _savingInstruction = false;
+
 function saveInstruction(e) {
     e.preventDefault();
+
+    if (_savingInstruction) {
+        console.warn('[Instruction] Save already in progress, ignoring duplicate call');
+        return;
+    }
+    _savingInstruction = true;
 
     const appointmentId = elements.instructAppointmentId.value;
     const patientId = elements.instructPatientId.value;
@@ -7827,6 +7848,8 @@ function saveInstruction(e) {
         transferHospital: elements.instructTransferHospital.value.trim(),
         selectedTests: selectedTests,
         linkedLabIds: editId ? (instructions.find(i => i.id === editId)?.linkedLabIds || []) : [],
+        contacted: editId ? (instructions.find(i => i.id === editId)?.contacted || false) : false,
+        contactedAt: editId ? (instructions.find(i => i.id === editId)?.contactedAt || null) : null,
         createdTime: editId ? instructions.find(i => i.id === editId)?.createdTime : toLocalISOString(new Date()),
         editedTime: toLocalISOString(new Date())
     };
@@ -7870,8 +7893,11 @@ function saveInstruction(e) {
             closeInstructionFormPanel();
             renderInstructionTableWithSaved();
             showNotification('Instruction updated successfully!');
+            _savingInstruction = false;
             return;
         }
+        // Instruction not found in array (shouldn't happen) — fall through to re-create it
+        console.warn('[Instruction] Edit target not found, re-creating instruction:', editId);
     }
 
     // New instruction
@@ -7900,6 +7926,8 @@ function saveInstruction(e) {
     if (!elements.calendarSection.classList.contains('hidden')) {
         refreshCalendar();
     }
+    
+    _savingInstruction = false;
 }
 
 /**
@@ -8547,7 +8575,8 @@ function filterLabTracker() {
         filtered = filtered.filter(lab => {
             const pName = (lab.patientName || '').toLowerCase();
             const dName = (lab.doctorName || '').toLowerCase();
-            return pName.includes(searchTerm) || dName.includes(searchTerm);
+            const patientId = (lab.patientId || '').toLowerCase();
+            return pName === searchTerm || dName === searchTerm || patientId === searchTerm;
         });
     }
 
@@ -9441,20 +9470,26 @@ function closeTimelineDialog() {
  * Toggle patient contacted status in calendar
  * @param {string} patientId - Patient ID
  * @param {string} patientName - Patient name
+ * @param {string} instructionId - Specific instruction ID (if omitted, uses latest)
  */
-async function togglePatientContacted(patientId, patientName) {
-    // Find latest instruction for this patient
-    const patientInstructions = (window.instructions || []).filter(i => i.patientId === patientId);
-    if (patientInstructions.length === 0) {
-        console.warn(`No instructions found for patient ${patientId}. Create an instruction first to track contact status.`);
+async function togglePatientContacted(patientId, patientName, instructionId) {
+    let instruction;
+    if (instructionId) {
+        instruction = (window.instructions || []).find(i => i.id === instructionId);
+    } else {
+        // Fallback: find latest instruction for this patient
+        const patientInstructions = (window.instructions || []).filter(i => i.patientId === patientId);
+        instruction = patientInstructions.length > 0 ? patientInstructions[patientInstructions.length - 1] : null;
+    }
+    if (!instruction) {
+        console.warn(`No instruction found for patient ${patientId}. Create an instruction first to track contact status.`);
         return;
     }
-    
-    const instruction = patientInstructions[patientInstructions.length - 1];
     const newContacted = !instruction.contacted;
     const now = new Date().toISOString();
     
     instruction.contacted = newContacted;
+    instruction.contactedAt = newContacted ? now : null;
     instruction.updatedAt = now;
 
     try {
@@ -10376,6 +10411,12 @@ async function loadCalendarData() {
     const bloodTests = ['Blood Test', 'C&S Results'];
     const imagingTests = ['USG', 'Echo', 'ECG', 'Xray', 'CT', 'MRI', 'Other'];
 
+    // Log ALL instructions for debugging
+    console.log('========== CALENDAR: ALL INSTRUCTIONS ==========');
+    instructions.forEach((inst, idx) => {
+        console.log(`[${idx}] Patient: ${inst.patientName} | ID: ${inst.id} | otherInstruction: "${inst.otherInstruction}" | generalInstruction: "${inst.generalInstruction}" | nextAppointmentDate: "${inst.nextAppointmentDate}" | appointmentDate: "${inst.appointmentDate}" | returnDuration: "${inst.returnDuration}" | returnUnit: "${inst.returnUnit}" | followUpDoctor: "${inst.followUpDoctor}" | doctorName: "${inst.doctorName}" | selectedTests: [${(inst.selectedTests || []).join(', ')}] | createdTime: "${inst.createdTime}"`);
+    });
+
     // Filter instructions for calendar display
     const validInstructions = instructions.filter(inst => {
         const other = (inst.otherInstruction || '').trim();
@@ -10403,49 +10444,62 @@ async function loadCalendarData() {
         };
 
         if (isExcluded(other) || isExcluded(general)) {
+            console.log(`[Calendar] EXCLUDED ${inst.patientName} (${inst.id}): otherInstruction="${other}" generalInstruction="${general}"`);
             return false;
         }
 
         // For After Results: only show when lab results are available (handled separately)
         if (inst.otherInstruction === 'After Results') {
+            console.log(`[Calendar] VALID (After Results) ${inst.patientName} (${inst.id}): will go to Pending events`);
             return true; // Will be processed in after-results section
         }
 
-        // For other instructions: must have next date, or tests with duration
+        // For other instructions: must have next date, returnDuration/returnUnit, or tests
         const hasDate = (inst.nextAppointmentDate && inst.nextAppointmentDate.trim() !== '') ||
-                        (inst.createdTime && inst.createdTime.trim() !== '');
+                        (inst.createdTime && inst.createdTime.trim() !== '') ||
+                        (inst.returnDuration && inst.returnUnit);
         const hasTests = inst.selectedTests && inst.selectedTests.length > 0;
 
-        return hasDate || hasTests;
+        if (!hasDate && !hasTests) {
+            console.log(`[Calendar] EXCLUDED ${inst.patientName} (${inst.id}): no nextAppointmentDate, no createdTime, no returnDuration/returnUnit, no selectedTests`);
+            return false;
+        }
+
+        console.log(`[Calendar] VALID ${inst.patientName} (${inst.id}): hasDate=${hasDate} hasTests=${hasTests}`);
+        return true;
     });
 
-    console.log(`[Calendar] Valid instructions: ${validInstructions.length}`);
-
-    // Log all valid instructions for debugging
+    console.log(`[Calendar] Total valid instructions: ${validInstructions.length} / ${instructions.length}`);
     validInstructions.forEach((inst, idx) => {
-        console.log(`  [${idx}] ${inst.patientName} - Type: ${inst.otherInstruction || 'Regular'}, Date: ${inst.nextAppointmentDate || 'none'}, Doctor: ${inst.followUpDoctor || inst.doctorName}`);
+        console.log(`  Valid[${idx}] ${inst.patientName} (${inst.id}) - Type: "${inst.otherInstruction || 'Regular'}" nextApptDate: "${inst.nextAppointmentDate}" apptDate: "${inst.appointmentDate}" returnDuration: "${inst.returnDuration} ${inst.returnUnit}" followUpDoc: "${inst.followUpDoctor}" docName: "${inst.doctorName}" tests: [${(inst.selectedTests || []).join(', ')}]`);
     });
 
     // Generate follow-up and test-before events (EXCLUDE After Results from this section)
     const regularInstructions = validInstructions.filter(inst => inst.otherInstruction !== 'After Results');
+    console.log(`[Calendar] Regular instructions to process: ${regularInstructions.length}`);
     
     regularInstructions.forEach(inst => {
         // Calculate follow-up date using priority:
         // 1. nextAppointmentDate (if explicitly set)
-        // 2. Calculated from appointmentDate + returnDuration + returnUnit
-        // 3. createdTime (fallback)
+        // 2. appointmentDate + returnDuration + returnUnit (calculated, e.g. July 17 + 3 days = July 20)
         let date = null;
+        let reason = '';
 
         if (inst.nextAppointmentDate && inst.nextAppointmentDate.trim() !== '') {
             date = inst.nextAppointmentDate;
-        } else if (inst.returnDuration && inst.returnUnit) {
+            reason = `nextAppointmentDate = "${date}"`;
+        } else if (inst.appointmentDate && inst.returnDuration && inst.returnUnit) {
             date = calculateFollowUpDate(inst.appointmentDate, inst.returnDuration, inst.returnUnit);
+            reason = `calculated from appointmentDate "${inst.appointmentDate}" + ${inst.returnDuration} ${inst.returnUnit} = "${date}"`;
         }
 
-        // Skip if no explicit date/duration - TODO events will handle this
+        // Skip if no date - TODO/pending events will handle this
         if (!date) {
+            console.log(`[Calendar] REGULAR SKIP ${inst.patientName} (${inst.id}): no date found (nextAppointmentDate="${inst.nextAppointmentDate}", appointmentDate="${inst.appointmentDate}", returnDuration="${inst.returnDuration} ${inst.returnUnit}") → goes to TODO`);
             return;
         }
+
+        console.log(`[Calendar] REGULAR EVENT ${inst.patientName} (${inst.id}): ${reason}, doctor="${inst.followUpDoctor || inst.doctorName}", date=${date}`);
 
         const doctorName = inst.followUpDoctor || inst.doctorName || 'Unknown Doctor';
         const phone = inst.phone || '';
@@ -10493,9 +10547,14 @@ async function loadCalendarData() {
     });
 
     // Generate combined PENDING events for After Results (both blood and imaging tests pending)
+    console.log('[Calendar] ===== AFTER RESULTS (PENDING) PROCESSING =====');
     validInstructions.filter(inst => inst.otherInstruction === 'After Results').forEach(inst => {
         const requiredTests = inst.selectedTests || [];
-        if (requiredTests.length === 0) return; // No tests required
+        if (requiredTests.length === 0) {
+            console.log(`[Calendar] PENDING SKIP ${inst.patientName} (${inst.id}): After Results but no selectedTests`);
+            return;
+        }
+        console.log(`[Calendar] PENDING ${inst.patientName} (${inst.id}): requiredTests=[${requiredTests.join(', ')}], patientId=${inst.patientId}`);
 
         // Match lab records by patientId only (strict matching to avoid name duplicates)
         const patientLabs = labRecords.filter(lab => lab.patientId === inst.patientId);
@@ -10520,8 +10579,11 @@ async function loadCalendarData() {
         const pendingBlood = requiredTests.filter(t => bloodTests.includes(t) && !completedTestNames.includes(t));
         const pendingImaging = requiredTests.filter(t => imagingTests.includes(t) && !completedTestNames.includes(t));
 
-        // Only create pending event if there are pending tests
-        if (pendingBlood.length === 0 && pendingImaging.length === 0) return;
+        if (pendingBlood.length === 0 && pendingImaging.length === 0) {
+            console.log(`[Calendar] PENDING SKIP ${inst.patientName}: all tests completed [${completedTestNames.join(', ')}]`);
+            return;
+        }
+        console.log(`[Calendar] PENDING ${inst.patientName}: pendingBlood=[${pendingBlood.join(', ')}], pendingImaging=[${pendingImaging.join(', ')}]`);
 
         // Get lab status for each pending blood test from all patient's lab tracker entries
         // If multiple labs exist, show count of each status
@@ -10546,8 +10608,8 @@ async function loadCalendarData() {
             }
         });
 
-        // "After Results" instructions should always appear on "today" until they are completed or handled
-        const date = today;
+        const date = (inst.contacted && inst.contactedAt) ? inst.contactedAt.split('T')[0] : today;
+        console.log(`[Calendar] PENDING EVENT ${inst.patientName}: date=${date} (contacted=${inst.contacted}, contactedAt=${inst.contactedAt}), doctor="${inst.followUpDoctor || inst.doctorName}", pendingBlood=[${pendingBlood.join(', ')}], pendingImaging=[${pendingImaging.join(', ')}]`);
         const doctorName = inst.followUpDoctor || inst.doctorName || 'Unknown Doctor';
 
         if (!calendarEvents[date]) {
@@ -10562,9 +10624,9 @@ async function loadCalendarData() {
             };
         }
 
-        // Check if patient already has a pending entry
+        // Check if instruction already has a pending entry
         const exists = calendarEvents[date][doctorName].patients.some(p =>
-            p.type === 'pending' && p.instruction.patientId === inst.patientId
+            p.type === 'pending' && p.instruction.id === inst.id
         );
 
         if (!exists) {
@@ -10603,9 +10665,21 @@ async function loadCalendarData() {
     // Generate TODO events for items without specific dates (appear on today's date)
     generateTODOCalendarEvents(validInstructions, labRecords, calendarEvents, bloodTests, imagingTests);
 
+    console.log('========== CALENDAR: FINAL EVENTS SUMMARY ==========');
     const eventDates = Object.keys(calendarEvents);
-    console.log(`[Calendar] Generated events for ${eventDates.length} dates:`, eventDates);
-    console.log('[Calendar] Calendar events object:', calendarEvents);
+    console.log(`[Calendar] Total dates with events: ${eventDates.length}`);
+    eventDates.forEach(d => {
+        const dayDoctors = Object.keys(calendarEvents[d]);
+        console.log(`  Date ${d}: ${dayDoctors.length} doctor(s)`);
+        dayDoctors.forEach(doc => {
+            const ev = calendarEvents[d][doc];
+            console.log(`    Doctor "${doc}" (types: [${[...ev.types].join(', ')}]): ${ev.patients.length} patient(s)`);
+            ev.patients.forEach((p, i) => {
+                const pid = p.instruction?.patientId || 'N/A';
+                console.log(`      [${i}] ${p.patientName} (ID: ${pid}, type: ${p.type})` + (p.todoReasons?.length ? ` reasons: ${p.todoReasons.join(', ')}` : '') + (p.tests?.length ? ` tests: [${p.tests.join(', ')}]` : ''));
+            });
+        });
+    });
     
     // Expose globally for TODO view and other components
     window.calendarEvents = calendarEvents;
@@ -10618,56 +10692,71 @@ async function loadCalendarData() {
  */
 function generateTODOCalendarEvents(instructions, labRecords, calendarEvents, bloodTests, imagingTests) {
     const today = new Date().toISOString().split('T')[0];
+    console.log(`[Calendar] ===== TODO PROCESSING ===== incoming instructions: ${instructions.length}`);
 
     // Collect all instructions without determinable dates
     const noDateInstructions = instructions.filter(inst => {
-        // Check if this instruction has NO determinable date
         let hasDate = false;
         if (inst.nextAppointmentDate && inst.nextAppointmentDate.trim() !== '') {
             hasDate = true;
         } else if (inst.returnDuration && inst.returnUnit) {
             hasDate = true;
         }
+        if (hasDate) {
+            console.log(`[Calendar] TODO EXCLUDED ${inst.patientName} (${inst.id}): has nextAppointmentDate or returnDuration`);
+        }
         return !hasDate;
     });
+    console.log(`[Calendar] TODO instructions to process: ${noDateInstructions.length}/${instructions.length}`);
 
     noDateInstructions.forEach(inst => {
         // Skip After Results instructions - they now have dedicated "Pending" events
         if (inst.otherInstruction === 'After Results') {
+            console.log(`[Calendar] TODO SKIP ${inst.patientName} (${inst.id}): After Results (handled separately)`);
             return;
         }
+
+        const isDoTestsBefore = (inst.otherInstruction || '').trim().toLowerCase() === 'do tests before';
+
+        // Use contacted date if checked, otherwise today
+        const targetDate = (inst.contacted && inst.contactedAt) ? inst.contactedAt.split('T')[0] : today;
+
+        console.log(`[Calendar] TODO EVENT ${inst.patientName} (${inst.id}): type="${isDoTestsBefore ? 'Do Tests Before' : 'Other'}", date=${targetDate}, doctor="${inst.followUpDoctor || inst.doctorName}"`);
 
         // Determine TODO reasons
         const reasons = [];
         
-        // Not After Results - check if follow-up date is missing
-        reasons.push('follow-up-no-date');
+        if (isDoTestsBefore) {
+            reasons.push('appointment-date-not-specified');
+        } else {
+            reasons.push('follow-up-no-date');
+        }
 
         const doctorName = inst.followUpDoctor || inst.doctorName || 'Unknown Doctor';
         const phone = inst.phone || '';
         const patientDisplay = `${inst.patientName}${inst.age ? ', ' + inst.age : ''}${phone ? ' (' + phone + ')' : ''}`;
 
-        if (!calendarEvents[today]) {
-            calendarEvents[today] = {};
+        if (!calendarEvents[targetDate]) {
+            calendarEvents[targetDate] = {};
         }
 
-        if (!calendarEvents[today][doctorName]) {
-            calendarEvents[today][doctorName] = {
+        if (!calendarEvents[targetDate][doctorName]) {
+            calendarEvents[targetDate][doctorName] = {
                 doctor: doctorName,
                 patients: [],
                 types: new Set()
             };
         }
 
-        // Check if patient already has a TODO entry for today
-        const exists = calendarEvents[today][doctorName].patients.some(p =>
-            p.type === 'todo' && p.instruction.patientId === inst.patientId
+        // Check if instruction already has a TODO entry for target date
+        const exists = calendarEvents[targetDate][doctorName].patients.some(p =>
+            p.type === 'todo' && p.instruction.id === inst.id
         );
 
         if (!exists) {
             const testsToCheck = inst.selectedTests || [];
 
-            calendarEvents[today][doctorName].patients.push({
+            calendarEvents[targetDate][doctorName].patients.push({
                 type: 'todo',
                 todoReasons: reasons,
                 instruction: inst,
@@ -10679,7 +10768,7 @@ function generateTODOCalendarEvents(instructions, labRecords, calendarEvents, bl
                 linkedLabIds: inst.linkedLabIds || []
             });
 
-            calendarEvents[today][doctorName].types.add('todo');
+            calendarEvents[targetDate][doctorName].types.add('todo');
         }
     });
 }
@@ -10900,10 +10989,10 @@ function renderCalendarPatientListHTML(patients, doctorName, date, highlightPati
 
             // Add checkbox for patient contact and proceed status
             const patientNameRaw = patient.patientName || '';
-            const patientInstructions = (window.instructions || []).filter(i => i.patientId === patientId);
-            const latestInstruction = patientInstructions.length > 0 ? patientInstructions[patientInstructions.length - 1] : null;
-             const isContacted = latestInstruction ? latestInstruction.contacted : false;
-             window[`contacted_${patientId}`] = isContacted;
+            const eventInstruction = patient.instruction;
+            const eventInstId = eventInstruction ? eventInstruction.id : '';
+            const isContacted = eventInstruction ? eventInstruction.contacted : false;
+            window[`contacted_${patientId}`] = isContacted;
 
 
             // Main row: Checkbox (left) + Patient info (right)
@@ -10913,7 +11002,7 @@ function renderCalendarPatientListHTML(patients, doctorName, date, highlightPati
                     type="checkbox"
                     id="contact_checkbox_${patientId}"
                     ${isContacted ? 'checked' : ''}
-                    onchange="window.togglePatientContacted('${patientId}', '${patientNameRaw.replace(/'/g, "\\'")}')"
+                    onchange="window.togglePatientContacted('${patientId}', '${patientNameRaw.replace(/'/g, "\\'")}', '${eventInstId}')"
                     style="cursor: pointer; width: 18px; height: 18px; flex-shrink: 0;"
                     title="Mark patient as contacted"
                 />
@@ -10951,6 +11040,8 @@ function renderCalendarPatientListHTML(patients, doctorName, date, highlightPati
                             html += `<div style="font-size: 0.8rem; color: #a855f7; margin-top: 4px; font-weight: 500;">⚠️ Follow-up date not specified</div>`;
                         } else if (reason === 'after-results-pending') {
                             html += `<div style="font-size: 0.8rem; color: #f97316; margin-top: 4px; font-weight: 500;">⏳ Awaiting lab results</div>`;
+                        } else if (reason === 'appointment-date-not-specified') {
+                            html += `<div style="font-size: 0.8rem; color: #ef4444; margin-top: 4px; font-weight: 600;">⚠️ Appointment date is not specified</div>`;
                         }
                     });
                 }
@@ -11240,10 +11331,14 @@ function setupCalendarEventListeners() {
 
     elements.calFilterDoctor.addEventListener('change', applyCalendarFilters);
     elements.calFilterType.addEventListener('change', applyCalendarFilters);
+    elements.calSearchInput.addEventListener('input', applyCalendarFilters);
 
-    elements.calClearFilters.addEventListener('click', () => {
+    elements.calClearFilters.addEventListener('click', async () => {
         elements.calFilterDoctor.value = '';
         elements.calFilterType.value = '';
+        elements.calSearchInput.value = '';
+        await loadFromStorage();
+        await loadCalendarData();
         renderCalendar();
     });
 
@@ -11328,6 +11423,7 @@ function setupCalendarEventListeners() {
 async function applyCalendarFilters() {
     const doctor = elements.calFilterDoctor.value;
     const type = elements.calFilterType.value;
+    const searchTerm = elements.calSearchInput.value.trim().toLowerCase();
 
     // Reload data from storage
     await loadFromStorage();
@@ -11335,8 +11431,9 @@ async function applyCalendarFilters() {
     // Regenerate events using the updated loadCalendarData logic
     await loadCalendarData();
 
-    // Apply additional filters to calendarEvents
-    if (doctor || type) {
+    const hasFilters = doctor || type || searchTerm;
+
+    if (hasFilters) {
         const filteredEvents = {};
 
         Object.keys(calendarEvents).forEach(date => {
@@ -11350,6 +11447,17 @@ async function applyCalendarFilters() {
 
                 // Type filter
                 if (type && !event.types.has(type)) return;
+
+                // Search filter (by patient name or ID)
+                if (searchTerm) {
+                    const matchingPatients = (event.patients || []).filter(p => {
+                        const name = (p.patientName || '').toLowerCase();
+                        const id = (p.instruction?.patientId || '').toLowerCase();
+                        return name.includes(searchTerm) || id.includes(searchTerm);
+                    });
+                    if (matchingPatients.length === 0) return;
+                    event.patients = matchingPatients;
+                }
 
                 filteredDay[doctorName] = event;
             });
@@ -11431,6 +11539,100 @@ window.addEventListener('offline', updateCalendarConnectionStatus);
 var incomingCallPhone = '';
 var incomingCallDbPatients = [];
 var incomingCallDbLoaded = false;
+
+// ==================== INCOMING CALL RINGTONE ====================
+var incomingCallAudioCtx = null;
+var incomingCallGainNode = null;
+var incomingCallRingInterval = null;
+var incomingCallRingPlaying = false;
+
+function incomingCallRingStart() {
+    if (incomingCallRingPlaying) return;
+    try {
+        if (!incomingCallAudioCtx) {
+            incomingCallAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (incomingCallAudioCtx.state === 'suspended') {
+            incomingCallAudioCtx.resume();
+        }
+        if (!incomingCallGainNode) {
+            incomingCallGainNode = incomingCallAudioCtx.createGain();
+            incomingCallGainNode.gain.value = 0.25;
+            incomingCallGainNode.connect(incomingCallAudioCtx.destination);
+        }
+        incomingCallRingPlaying = true;
+
+        function playRingPattern() {
+            if (!incomingCallRingPlaying || !incomingCallAudioCtx) return;
+            var now = incomingCallAudioCtx.currentTime;
+
+            // First tone: C5 (523Hz) + E5 (659Hz) for richness
+            var osc1 = incomingCallAudioCtx.createOscillator();
+            osc1.type = 'triangle';
+            osc1.frequency.value = 523.25;
+            var g1 = incomingCallAudioCtx.createGain();
+            g1.gain.setValueAtTime(0.3, now);
+            g1.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+            osc1.connect(g1);
+            g1.connect(incomingCallGainNode);
+            osc1.start(now);
+            osc1.stop(now + 0.35);
+
+            var osc1h = incomingCallAudioCtx.createOscillator();
+            osc1h.type = 'sine';
+            osc1h.frequency.value = 659.25;
+            var g1h = incomingCallAudioCtx.createGain();
+            g1h.gain.setValueAtTime(0.15, now);
+            g1h.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+            osc1h.connect(g1h);
+            g1h.connect(incomingCallGainNode);
+            osc1h.start(now);
+            osc1h.stop(now + 0.35);
+
+            // Second tone: G5 (784Hz) + B5 (988Hz)
+            var osc2 = incomingCallAudioCtx.createOscillator();
+            osc2.type = 'triangle';
+            osc2.frequency.value = 783.99;
+            var g2 = incomingCallAudioCtx.createGain();
+            g2.gain.setValueAtTime(0.3, now + 0.45);
+            g2.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+            osc2.connect(g2);
+            g2.connect(incomingCallGainNode);
+            osc2.start(now + 0.45);
+            osc2.stop(now + 0.8);
+
+            var osc2h = incomingCallAudioCtx.createOscillator();
+            osc2h.type = 'sine';
+            osc2h.frequency.value = 987.77;
+            var g2h = incomingCallAudioCtx.createGain();
+            g2h.gain.setValueAtTime(0.15, now + 0.45);
+            g2h.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+            osc2h.connect(g2h);
+            g2h.connect(incomingCallGainNode);
+            osc2h.start(now + 0.45);
+            osc2h.stop(now + 0.8);
+        }
+
+        playRingPattern();
+        incomingCallRingInterval = setInterval(playRingPattern, 1500);
+    } catch (e) {
+        console.error('[Ringtone] Error starting ringtone:', e);
+        incomingCallRingPlaying = false;
+    }
+}
+
+function incomingCallRingStop() {
+    incomingCallRingPlaying = false;
+    if (incomingCallRingInterval) {
+        clearInterval(incomingCallRingInterval);
+        incomingCallRingInterval = null;
+    }
+    if (incomingCallAudioCtx) {
+        incomingCallAudioCtx.close().catch(function(){});
+        incomingCallAudioCtx = null;
+    }
+    incomingCallGainNode = null;
+}
 
 // ==================== INCOMING CALL NOTIFICATION SETTING ====================
 var incomingCallNotificationEnabled = true;
@@ -11528,6 +11730,7 @@ function ensureIncomingCallOverlay() {
 
 function incomingCallOpen(phone) {
     incomingCallPhone = phone;
+    incomingCallRingStart();
     if (!ensureIncomingCallOverlay()) return;
     var phoneEl = document.getElementById('incomingCallPhone');
     if (phoneEl) phoneEl.textContent = '📞 ' + phone;
@@ -11546,6 +11749,7 @@ function incomingCallOpen(phone) {
 }
 
 function incomingCallMinimize() {
+    incomingCallRingStop();
     var overlay = document.getElementById('incomingCallOverlay');
     if (overlay) overlay.classList.add('hidden');
     document.body.style.overflow = '';
@@ -11562,6 +11766,7 @@ function incomingCallRestore() {
 }
 
 function incomingCallClose() {
+    incomingCallRingStop();
     incomingCallPhone = '';
     incomingCallDbPatients = [];
     incomingCallDbLoaded = false;

@@ -47,7 +47,7 @@ class DataLayer {
                 'doctorName', 'appointmentDate', 'bookingNumber', 'generalInstruction', 
                 'returnDuration', 'returnUnit', 'nextAppointmentDate', 'followUpDoctor', 
                 'otherInstruction', 'transferHospital', 'selectedTests', 
-                'linkedLabIds', 'labTrackerId', 'createdAt', 'createdTime', 'updatedAt', 'editedTime', 'needInstruction', 'contacted'
+                'linkedLabIds', 'labTrackerId', 'createdAt', 'createdTime', 'updatedAt', 'editedTime', 'needInstruction', 'contacted', 'contactedAt'
             ],
             'expenses': [
                 'id', 'amount', 'category', 'remark', 'patientId', 'patientName', 
@@ -612,7 +612,8 @@ class DataLayer {
             'labName': 'lab_name',
             'pendingTests': 'pending_tests',
             'appointmentDate': 'appointment_date',
-            'generalInstruction': 'general_instruction'
+            'generalInstruction': 'general_instruction',
+            'contactedAt': 'contacted_at'
         };
 
         const swap = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [v, k]));
@@ -706,7 +707,8 @@ class DataLayer {
             'labName': 'lab_name',
             'pendingTests': 'pending_tests',
             'appointmentDate': 'appointment_date',
-            'generalInstruction': 'general_instruction'
+            'generalInstruction': 'general_instruction',
+            'contactedAt': 'contacted_at'
         };
 
         // Table-specific mappings (only for very specific overrides)
@@ -755,7 +757,7 @@ class DataLayer {
             'expense_type', 'custom_type_name', 'custom_icon', 'appointment_id',
             'expense_id', 'lab_name', 'pending_tests', 'timeline', 'address', 'is_foc', 'value',
             'icon', 'appointment_date', 'general_instruction',
-            'contacted'
+            'contacted', 'contacted_at'
         ];
 
         // Special handling for settings table updated_at mapping
@@ -774,9 +776,9 @@ class DataLayer {
                     'appointment_time', 'waiting_time', 'consultation_time', 'done_time', 
                     'postpone_time', 'arrival_time', 'booked_time', 'noted_time', 
                     'inconsult_time', 'investigation_time', 'consult_start_time', 
-                    'edited_time', 'date_time', 'created_at', 'updated_at'
+                    'edited_time', 'date_time', 'created_at', 'updated_at', 'contacted_at'
                 ];
-                const booleanFields = ['is_foc', 'is_next', 'need_instruction'];
+                const booleanFields = ['is_foc', 'is_next', 'need_instruction', 'contacted'];
                 const complexFields = ['selected_tests', 'pending_tests', 'timeline', 'linked_lab_ids'];
 
                 if ((numericFields.includes(field) || 
