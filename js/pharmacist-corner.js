@@ -253,7 +253,7 @@ class PharmacistCornerApp {
             filtered = filtered.filter(appt => {
                 const patientName = (appt.patient_name || appt.patientName || '').toLowerCase();
                 const bookingNumber = String(appt.booking_number || appt.bookingNumber || '');
-                return patientName === this.searchTerm || bookingNumber === this.searchTerm;
+                return patientName.includes(this.searchTerm) || bookingNumber.includes(this.searchTerm);
             });
         }
 

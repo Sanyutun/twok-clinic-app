@@ -2375,10 +2375,10 @@ function searchPatients(searchTerm) {
         const address = (p.address || '').toLowerCase();
         const id = (p.id || '').toLowerCase();
         
-        return name === term || 
-               age === term || 
-               phone === term || 
-               address === term ||
+        return name.includes(term) || 
+               age.includes(term) || 
+               phone.includes(term) || 
+               address.includes(term) ||
                id === term;
     });
     renderPatientTable(filtered);
@@ -4254,7 +4254,7 @@ function searchAppointments(searchTerm) {
             const dName = (a.doctorName || '').toLowerCase();
             const phone = (a.phone || '').toLowerCase();
             const patientId = (a.patientId || '').toLowerCase();
-            return pName === term || dName === term || phone === term || patientId === term;
+            return pName.includes(term) || dName.includes(term) || phone.includes(term) || patientId === term;
         });
     }
 
@@ -4657,7 +4657,7 @@ function renderInstructionTableWithSaved() {
     // Filter by search
     if (searchTerm) {
         allAppointments = allAppointments.filter(appt =>
-            (appt.patientName || '').toLowerCase() === searchTerm ||
+            (appt.patientName || '').toLowerCase().includes(searchTerm) ||
             (appt.patientId || '').toLowerCase() === searchTerm
         );
     }
@@ -8576,7 +8576,7 @@ function filterLabTracker() {
             const pName = (lab.patientName || '').toLowerCase();
             const dName = (lab.doctorName || '').toLowerCase();
             const patientId = (lab.patientId || '').toLowerCase();
-            return pName === searchTerm || dName === searchTerm || patientId === searchTerm;
+            return pName.includes(searchTerm) || dName.includes(searchTerm) || patientId === searchTerm;
         });
     }
 
@@ -11453,7 +11453,7 @@ async function applyCalendarFilters() {
                     const matchingPatients = (event.patients || []).filter(p => {
                         const name = (p.patientName || '').toLowerCase();
                         const id = (p.instruction?.patientId || '').toLowerCase();
-                        return name.includes(searchTerm) || id.includes(searchTerm);
+                        return name.includes(searchTerm) || id === searchTerm;
                     });
                     if (matchingPatients.length === 0) return;
                     event.patients = matchingPatients;
