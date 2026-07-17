@@ -602,11 +602,6 @@ app.get('/incoming-call', async (req, res) => {
             if (isVisible && !dbLoaded) {
                 loadPatientDatabase();
             }
-            if (isVisible) {
-                setTimeout(function() {
-                    document.getElementById('patientNameSearch').focus();
-                }, 200);
-            }
         }
 
         async function loadPatientDatabase() {

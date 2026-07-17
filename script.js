@@ -1073,8 +1073,6 @@ async function init() {
         } else {
             elements.appointmentDoctor.value = TARGET_DOCTOR_NAME;
         }
-        // Focus on date/time field
-        setTimeout(() => elements.appointmentDateTime.focus(), 300);
     } else if (actionParam === 'openLabTracker') {
         switchSection('lab');
         if (patientNameParam) {
@@ -2565,7 +2563,7 @@ function savePatient(e) {
         note: elements.patientNote.value.trim(),
         isFoc: elements.patientIsFoc.checked
     };
-    if (!data.name) { showNotification('Patient name is required', 'error'); elements.patientName.focus(); return; }
+    if (!data.name) { showNotification('Patient name is required', 'error'); return; }
 
     const addr = data.address.trim();
     if (addr && !addresses.includes(addr)) {
@@ -2599,8 +2597,6 @@ function savePatient(e) {
         elements.displayPatientPhone.value = data.phone || '';
         elements.displayPatientFoc.value = data.isFoc ? 'FOC' : 'Regular';
         elements.patientInfoDisplay.style.display = 'grid';
-        // Focus on doctor field
-        setTimeout(() => elements.appointmentDoctor.focus(), 200);
         window._incomingCallPrefillPhone = null;
         return;
     }
@@ -2707,7 +2703,6 @@ function resetPatientForm() {
     document.getElementById('patientBarcodeContainer').innerHTML = '';
     
     generatePatientId();
-    elements.patientName.focus();
 }
 
 function openPatientFormModal() {
@@ -2725,7 +2720,6 @@ function closePatientFormModal() {
 
 function clearPatientForm() {
     resetPatientForm();
-    elements.patientName.focus();
 }
 
 // ==================== DOCTOR CRUD ====================
@@ -2768,7 +2762,6 @@ function loadDoctorToForm(doctorId) {
     elements.doctorSaveBtnText.textContent = 'Update Doctor';
     elements.doctorDeleteBtn.style.display = 'inline-block';
     openDoctorFormModal();
-    elements.doctorName.focus();
 }
 
 function saveDoctor(e) {
@@ -2781,10 +2774,10 @@ function saveDoctor(e) {
         phone: elements.doctorPhone.value.trim(),
         needInstruction: elements.doctorNeedInstruction.checked
     };
-    if (!data.name) { showNotification('Doctor name is required', 'error'); elements.doctorName.focus(); return; }
-    if (!data.speciality) { showNotification('Speciality is required', 'error'); elements.doctorSpeciality.focus(); return; }
-    if (!data.hospital) { showNotification('Hospital is required', 'error'); elements.doctorHospital.focus(); return; }
-    if (!data.phone) { showNotification('Phone number is required', 'error'); elements.doctorPhone.focus(); return; }
+    if (!data.name) { showNotification('Doctor name is required', 'error'); return; }
+    if (!data.speciality) { showNotification('Speciality is required', 'error'); return; }
+    if (!data.hospital) { showNotification('Hospital is required', 'error'); return; }
+    if (!data.phone) { showNotification('Phone number is required', 'error'); return; }
 
     const spec = data.speciality.trim();
     if (spec && !specialities.includes(spec)) {
@@ -2882,7 +2875,6 @@ function resetDoctorForm() {
     elements.doctorSaveBtnText.textContent = 'Save Doctor';
     elements.doctorDeleteBtn.style.display = 'none';
     generateDoctorId();
-    elements.doctorName.focus();
 }
 
 function openDoctorFormModal() {
@@ -2898,14 +2890,12 @@ function closeDoctorFormModal() {
 
 function clearDoctorForm() {
     resetDoctorForm();
-    elements.doctorName.focus();
 }
 
 // ==================== ADDRESS MANAGEMENT ====================
 function openAddressModal() {
     renderAddressManageList();
     elements.addressModal.classList.remove('hidden');
-    elements.newAddressInput.focus();
 }
 
 function closeAddressModal() {
@@ -2916,13 +2906,12 @@ function closeAddressModal() {
 function addAddress() {
     const addr = elements.newAddressInput.value.trim();
     if (!addr) { showNotification('Please enter an address', 'error'); return; }
-    if (addresses.includes(addr)) { showNotification('Address already exists', 'error'); elements.newAddressInput.focus(); return; }
+    if (addresses.includes(addr)) { showNotification('Address already exists', 'error'); return; }
     addresses.push(addr);
     saveAddressesToStorage();
     renderAddressList();
     renderAddressManageList();
     elements.newAddressInput.value = '';
-    elements.newAddressInput.focus();
     showNotification('Address added successfully!');
 }
 
@@ -2948,7 +2937,6 @@ function deleteAddress(event, index) {
 function openSpecialityModal() {
     renderSpecialityManageList();
     elements.specialityModal.classList.remove('hidden');
-    elements.newSpecialityInput.focus();
 }
 
 function closeSpecialityModal() {
@@ -2959,13 +2947,12 @@ function closeSpecialityModal() {
 function addSpeciality() {
     const spec = elements.newSpecialityInput.value.trim();
     if (!spec) { showNotification('Please enter a speciality', 'error'); return; }
-    if (specialities.includes(spec)) { showNotification('Speciality already exists', 'error'); elements.newSpecialityInput.focus(); return; }
+    if (specialities.includes(spec)) { showNotification('Speciality already exists', 'error'); return; }
     specialities.push(spec);
     saveSpecialitiesToStorage();
     renderSpecialityList();
     renderSpecialityManageList();
     elements.newSpecialityInput.value = '';
-    elements.newSpecialityInput.focus();
     showNotification('Speciality added successfully!');
 }
 
@@ -2991,7 +2978,6 @@ function deleteSpeciality(event, index) {
 function openHospitalModal() {
     renderHospitalManageList();
     elements.hospitalModal.classList.remove('hidden');
-    elements.newHospitalInput.focus();
 }
 
 function closeHospitalModal() {
@@ -3002,13 +2988,12 @@ function closeHospitalModal() {
 function addHospital() {
     const hosp = elements.newHospitalInput.value.trim();
     if (!hosp) { showNotification('Please enter a hospital', 'error'); return; }
-    if (hospitals.includes(hosp)) { showNotification('Hospital already exists', 'error'); elements.newHospitalInput.focus(); return; }
+    if (hospitals.includes(hosp)) { showNotification('Hospital already exists', 'error'); return; }
     hospitals.push(hosp);
     saveHospitalsToStorage();
     renderHospitalList();
     renderHospitalManageList();
     elements.newHospitalInput.value = '';
-    elements.newHospitalInput.focus();
     showNotification('Hospital added successfully!');
 }
 
@@ -5233,7 +5218,6 @@ function selectPatient(patientId) {
         window._incomingCallPrefillPhone = null;
     }
 
-    elements.appointmentDoctor.focus();
 }
 
 function showDoctorAutocomplete(searchTerm) {
@@ -5274,7 +5258,6 @@ function showDoctorAutocomplete(searchTerm) {
                 elements.appointmentDoctor.value = name;
                 elements.appointmentDoctorId.value = id || '';
                 elements.doctorAutocomplete.classList.add('hidden');
-                elements.appointmentDateTime.focus();
             }
         });
     });
@@ -5364,10 +5347,10 @@ async function saveAppointment(e) {
         status = manualStatus || 'Noted';
     }
 
-    if (!patientName) { showNotification('Patient name is required', 'error'); elements.appointmentPatient.focus(); return; }
-    if (!doctorName) { showNotification('Doctor name is required', 'error'); elements.appointmentDoctor.focus(); return; }
-    if (!dateTime) { showNotification('Date & Time is required', 'error'); elements.appointmentDateTime.focus(); return; }
-    if (!bookingType) { showNotification('Booking type is required', 'error'); elements.appointmentBookingType.focus(); return; }
+    if (!patientName) { showNotification('Patient name is required', 'error'); return; }
+    if (!doctorName) { showNotification('Doctor name is required', 'error'); return; }
+    if (!dateTime) { showNotification('Date & Time is required', 'error'); return; }
+    if (!bookingType) { showNotification('Booking type is required', 'error'); return; }
 
     // Resolve patientId and doctorId defensively to avoid FK violations
     let resolvedPatientId = elements.appointmentPatientId.value;
@@ -5932,9 +5915,6 @@ function openCalendarAppointmentForm() {
     elements.calendarAppointmentFormPanel.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
 
-    setTimeout(() => {
-        elements.calendarApptPatient.focus();
-    }, 100);
 }
 
 /**
@@ -5987,8 +5967,6 @@ function selectCalendarPatient(patientId) {
 
     // Check for pending lab results
     displayCalendarPendingLabResults(patient.id, patient.name);
-
-    elements.calendarApptDoctor.focus();
 }
 
 /**
@@ -6019,11 +5997,11 @@ async function saveCalendarAppointment(e) {
     const bookingType = elements.calendarApptBookingType.value;
     const status = elements.calendarApptStatus.value;
 
-    if (!patientName) { showNotification('Patient name is required', 'error'); elements.calendarApptPatient.focus(); return; }
-    if (!doctorName) { showNotification('Doctor name is required', 'error'); elements.calendarApptDoctor.focus(); return; }
-    if (!dateTime) { showNotification('Date & Time is required', 'error'); elements.calendarApptDateTime.focus(); return; }
-    if (!bookingType) { showNotification('Booking type is required', 'error'); elements.calendarApptBookingType.focus(); return; }
-    if (!status) { showNotification('Status is required', 'error'); elements.calendarApptStatus.focus(); return; }
+    if (!patientName) { showNotification('Patient name is required', 'error'); return; }
+    if (!doctorName) { showNotification('Doctor name is required', 'error'); return; }
+    if (!dateTime) { showNotification('Date & Time is required', 'error'); return; }
+    if (!bookingType) { showNotification('Booking type is required', 'error'); return; }
+    if (!status) { showNotification('Status is required', 'error'); return; }
 
     const appointmentDate = dateTime.split('T')[0];
 
@@ -6221,7 +6199,6 @@ function showCalendarDoctorAutocomplete(searchTerm) {
                 elements.calendarApptDoctor.value = name;
                 elements.calendarApptDoctorId.value = id || '';
                 elements.calendarDoctorAutocomplete.classList.add('hidden');
-                elements.calendarApptDateTime.focus();
                 
                 // Recalculate booking number
                 const dateTime = elements.calendarApptDateTime.value;
@@ -6421,37 +6398,6 @@ function setupEventListeners() {
         }
     });
 
-    elements.patientName.addEventListener('blur', () => {
-        setTimeout(() => {
-            if (!document.activeElement.closest('#patientName') && elements.patientName.value) {
-                elements.patientAge.focus();
-            }
-        }, 200);
-    });
-
-    elements.patientAge.addEventListener('blur', () => {
-        setTimeout(() => {
-            if (!document.activeElement.closest('#patientAge')) {
-                elements.patientSex.focus();
-            }
-        }, 200);
-    });
-
-    elements.patientSex.addEventListener('change', () => {
-        setTimeout(() => {
-            elements.patientAddress.focus();
-        }, 100);
-    });
-
-    elements.patientAddress.addEventListener('blur', () => {
-        setTimeout(() => {
-            if (!document.activeElement.closest('#patientAddress') && elements.patientAddress.value) {
-                const firstInput = elements.patientPhonesContainer.querySelector('.patient-phone-input');
-                if (firstInput) firstInput.focus();
-            }
-        }, 200);
-    });
-
     // Patient - Clear/Cancel
     elements.patientClearBtn.addEventListener('click', clearPatientForm);
     elements.patientCancelBtn.addEventListener('click', closePatientFormModal);
@@ -6503,7 +6449,6 @@ function setupEventListeners() {
         });
         entry.querySelector('.phone-copy-btn').addEventListener('click', () => copyPatientPhone());
         elements.patientPhonesContainer.appendChild(entry);
-        entry.querySelector('.patient-phone-input').focus();
         updateRemoveButtons();
     });
 
@@ -6696,25 +6641,7 @@ function setupEventListeners() {
         });
     });
 
-    // Keyboard navigation - Patient form
-    elements.patientForm.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
-            e.preventDefault();
-            const formEls = Array.from(elements.patientForm.elements).filter(el => el.tagName !== 'BUTTON' && el.type !== 'hidden');
-            const idx = formEls.indexOf(e.target);
-            if (idx < formEls.length - 1) formEls[idx + 1].focus();
-        }
-    });
 
-    // Keyboard navigation - Doctor form
-    elements.doctorForm.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
-            e.preventDefault();
-            const formEls = Array.from(elements.doctorForm.elements).filter(el => el.tagName !== 'BUTTON' && el.type !== 'hidden');
-            const idx = formEls.indexOf(e.target);
-            if (idx < formEls.length - 1) formEls[idx + 1].focus();
-        }
-    });
 
     // ==================== APPOINTMENT EVENT LISTENERS ====================
     
@@ -6754,37 +6681,6 @@ function setupEventListeners() {
 
     // Appointment form submit
     elements.appointmentForm.addEventListener('submit', saveAppointment);
-
-    // Appointment - Mobile navigation (blur auto-advance)
-    elements.appointmentPatient.addEventListener('blur', () => {
-        setTimeout(() => {
-            if (!document.activeElement.closest('#appointmentPatient') && elements.appointmentPatientId.value) {
-                elements.appointmentDoctor.focus();
-            }
-        }, 200);
-    });
-
-    elements.appointmentDoctor.addEventListener('blur', () => {
-        setTimeout(() => {
-            if (!document.activeElement.closest('#appointmentDoctor') && elements.appointmentDoctorId.value) {
-                elements.appointmentDateTime.focus();
-            }
-        }, 200);
-    });
-
-    elements.appointmentDateTime.addEventListener('blur', () => {
-        setTimeout(() => {
-            if (!document.activeElement.closest('#appointmentDateTime')) {
-                elements.appointmentBookingType.focus();
-            }
-        }, 200);
-    });
-
-    elements.appointmentBookingType.addEventListener('change', () => {
-        setTimeout(() => {
-            elements.appointmentStatus.focus();
-        }, 100);
-    });
 
     // Appointment clear/cancel
     elements.appointmentClearBtn.addEventListener('click', clearAppointmentForm);
@@ -7029,16 +6925,6 @@ function setupEventListeners() {
         }
     });
 
-    // Keyboard navigation - Appointment form
-    elements.appointmentForm.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && !e.target.closest('.autocomplete-wrapper')) {
-            e.preventDefault();
-            const formEls = Array.from(elements.appointmentForm.elements).filter(el => el.tagName !== 'BUTTON' && el.type !== 'hidden');
-            const idx = formEls.indexOf(e.target);
-            if (idx < formEls.length - 1) formEls[idx + 1].focus();
-        }
-    });
-
     // ==================== INVESTIGATION DIALOG EVENT LISTENERS ====================
 
     // Investigation dialog buttons
@@ -7137,7 +7023,6 @@ function setupEventListeners() {
             if (cb.value === 'Other') {
                 if (cb.checked) {
                     elements.customTestGroup.classList.remove('hidden');
-                    elements.instructCustomTest.focus();
                 } else {
                     elements.customTestGroup.classList.add('hidden');
                     elements.instructCustomTest.value = '';
@@ -7231,7 +7116,6 @@ function setupEventListeners() {
         const pendingSection = document.getElementById('pendingTestsSection');
         if (e.target.value === 'Partial Result Out') {
             pendingSection.classList.remove('hidden');
-            document.getElementById('labPendingTests').focus();
         } else {
             pendingSection.classList.add('hidden');
             document.getElementById('labPendingTests').value = '';
@@ -9030,13 +8914,6 @@ function openLabFormModal() {
     document.body.style.overflow = 'hidden';
 
     console.log('[LabTracker] Lab form modal opened');
-
-    // Focus on Patient Name field after modal opens
-    setTimeout(() => {
-        if (elements.labPatient) {
-            elements.labPatient.focus();
-        }
-    }, 100);
 }
 
 /**
@@ -9071,8 +8948,6 @@ function resetLabForm() {
     // Set default datetime to now
     const now = new Date();
     elements.labDateTime.value = toLocalISOString(now).slice(0, 16);
-
-    elements.labPatient.focus();
 }
 
 /**
@@ -9080,7 +8955,6 @@ function resetLabForm() {
  */
 function clearLabForm() {
     resetLabForm();
-    elements.labPatient.focus();
 }
 
 /**
@@ -9140,7 +9014,6 @@ function selectLabPatient(patientId) {
     elements.labPatient.value = patient.name;
     elements.labPatientId.value = patient.id;
     elements.labPatientAutocomplete.classList.add('hidden');
-    elements.labDoctor.focus();
 }
 
 /**
@@ -9183,7 +9056,6 @@ function showLabDoctorAutocomplete(searchTerm) {
                 elements.labDoctor.value = name;
                 elements.labDoctorId.value = id || '';
                 elements.labDoctorAutocomplete.classList.add('hidden');
-                elements.labName.focus();
             }
         });
     });
@@ -9225,7 +9097,6 @@ function editLabRecord(labId) {
     elements.labDeleteBtn.style.display = 'inline-block';
 
     openLabFormModal();
-    elements.labPatient.focus();
 }
 
 /**
@@ -9271,17 +9142,16 @@ function saveLabRecord(e) {
     const dateTime = elements.labDateTime.value;
     const pendingTests = document.getElementById('labPendingTests').value.trim();
 
-    if (!patientName) { showNotification('Patient name is required', 'error'); elements.labPatient.focus(); return; }
-    if (!doctorName) { showNotification('Doctor name is required', 'error'); elements.labDoctor.focus(); return; }
-    if (!labName) { showNotification('Lab name is required', 'error'); elements.labName.focus(); return; }
-    if (!amount) { showNotification('Amount is required', 'error'); elements.labAmount.focus(); return; }
-    if (!status) { showNotification('Status is required', 'error'); elements.labStatus.focus(); return; }
-    if (!dateTime) { showNotification('Date & Time is required', 'error'); elements.labDateTime.focus(); return; }
+    if (!patientName) { showNotification('Patient name is required', 'error'); return; }
+    if (!doctorName) { showNotification('Doctor name is required', 'error'); return; }
+    if (!labName) { showNotification('Lab name is required', 'error'); return; }
+    if (!amount) { showNotification('Amount is required', 'error'); return; }
+    if (!status) { showNotification('Status is required', 'error'); return; }
+    if (!dateTime) { showNotification('Date & Time is required', 'error'); return; }
     
     // Validate pending tests for Partial Result Out status
     if (status === 'Partial Result Out' && !pendingTests) {
         showNotification('Please enter which test results are still pending', 'error');
-        document.getElementById('labPendingTests').focus();
         return;
     }
 
@@ -11353,7 +11223,6 @@ function setupCalendarEventListeners() {
     // Calendar appointment clear and delete
     elements.calendarApptClearBtn.addEventListener('click', () => {
         resetCalendarAppointmentForm();
-        elements.calendarApptPatient.focus();
     });
     
     elements.calendarApptDeleteBtn.addEventListener('click', async () => {
@@ -11803,7 +11672,7 @@ function incomingCallToggleAddPhone() {
     section.style.display = isVisible ? 'none' : 'block';
     if (!isVisible) {
         if (!incomingCallDbLoaded) incomingCallLoadPatientDb();
-        setTimeout(function () { var el = document.getElementById('incomingCallPatientSearch'); if (el) el.focus(); }, 200);
+
     }
 }
 
@@ -11914,7 +11783,6 @@ function incomingCallCreateAppointment(idEnc, nameRaw, phoneEnc) {
     } else {
         elements.appointmentDoctor.value = TARGET_DOCTOR_NAME;
     }
-    setTimeout(function() { elements.appointmentDateTime.focus(); }, 300);
 }
 
 function incomingCallOpenLabTracker(nameRaw, phoneEnc) {
