@@ -364,6 +364,7 @@ const elements = {
     displayPatientAge: document.getElementById('displayPatientAge'),
     displayPatientSex: document.getElementById('displayPatientSex'),
     displayPatientFoc: document.getElementById('displayPatientFoc'),
+    editPatientFromAppointmentBtn: document.getElementById('editPatientFromAppointmentBtn'),
     labResultWarning: document.getElementById('labResultWarning'),
     labWarningDetails: document.getElementById('labWarningDetails'),
     appointmentDoctor: document.getElementById('appointmentDoctor'),
@@ -2446,8 +2447,10 @@ function loadPatientToForm(patientId) {
     elements.patientFormTitle.textContent = 'Edit Patient';
     elements.patientSaveBtnText.textContent = 'Update Patient';
     elements.patientDeleteBtn.style.display = 'inline-block';
-    // Editing is always from patient tab
-    window.patientFormSourceSection = 'patient';
+    // Preserve appointment source if coming from appointment form
+    if (window.patientFormSourceSection !== 'appointment') {
+        window.patientFormSourceSection = 'patient';
+    }
     
     // Show barcode for this patient
     showPatientBarcode(p.id);
@@ -6800,6 +6803,18 @@ function setupEventListeners() {
         // Update form title to show context
         elements.patientFormTitle.textContent = 'Register New Patient (for Appointment)';
         openPatientFormModal();
+    });
+
+    // Edit patient info from appointment form
+    elements.editPatientFromAppointmentBtn.addEventListener('click', () => {
+        const patientId = elements.appointmentPatientId.value;
+        if (!patientId) {
+            showNotification('No patient selected', 'error');
+            return;
+        }
+        window.patientFormSourceSection = 'appointment';
+        loadPatientToForm(patientId);
+        elements.patientFormTitle.textContent = 'Edit Patient Info (for Appointment)';
     });
 
     // Booking type change - recalculate booking number

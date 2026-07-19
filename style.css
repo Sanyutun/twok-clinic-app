@@ -1701,6 +1701,21 @@ tbody tr.highlighted {
     font-weight: 500;
 }
 
+.patient-info-display .btn-edit {
+    background-color: transparent;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.patient-info-display .btn-edit:hover {
+    background-color: #d1fae5;
+}
+
 /* Responsive: stack on very small screens */
 @media (max-width: 480px) {
     .patient-info-display {
