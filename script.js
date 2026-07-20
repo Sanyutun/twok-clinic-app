@@ -9289,8 +9289,21 @@ function showTimeline(labId) {
     const lab = labRecords.find(l => (l.labId || l.id) === labId);
     if (!lab) return;
 
+    const patient = patients.find(p => p.id === lab.patientId);
+    const name = patient ? patient.name : lab.patientName;
+    const age = patient ? patient.age : '-';
+    const sex = patient ? patient.sex : '-';
+    const phone = patient ? patient.phone : '-';
+    const address = patient ? patient.address : '-';
+
     elements.timelinePatientInfo.innerHTML = `
-        <h4>${escapeHtml(lab.patientName)} - ${escapeHtml(lab.labName)}</h4>
+        <h4>${escapeHtml(name)} - ${escapeHtml(lab.labName)}</h4>
+        <div class="patient-details-grid">
+            <div class="detail-item"><span class="detail-label">Age</span><span class="detail-value">${escapeHtml(age)}</span></div>
+            <div class="detail-item"><span class="detail-label">Sex</span><span class="detail-value">${escapeHtml(sex)}</span></div>
+            <div class="detail-item"><span class="detail-label">Phone</span><span class="detail-value">${escapeHtml(phone)}</span></div>
+            <div class="detail-item"><span class="detail-label">Address</span><span class="detail-value">${escapeHtml(address)}</span></div>
+        </div>
         <p><strong>Lab ID:</strong> ${escapeHtml(lab.labId)}</p>
         <p><strong>Doctor:</strong> ${escapeHtml(lab.doctorName)}</p>
         <p><strong>Amount:</strong> ${formatCurrency(lab.amount)}</p>

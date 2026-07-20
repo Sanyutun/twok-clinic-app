@@ -3344,6 +3344,36 @@ tbody tr.current-patient td {
     font-size: 0.85rem;
 }
 
+.patient-details-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+    margin-bottom: 8px;
+    padding: 8px;
+    background: #fff;
+    border-radius: 6px;
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.detail-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.detail-value {
+    font-size: 0.85rem;
+    color: #1e293b;
+    word-break: break-word;
+}
+
 .timeline-content {
     position: relative;
     padding-left: 25px;
