@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS expenses (
     category VARCHAR(255),
     remark TEXT,
     patient_id VARCHAR(50) REFERENCES patients(id) ON DELETE CASCADE,
+    doctor_id VARCHAR(50) REFERENCES doctors(id) ON DELETE CASCADE,
     patient_name VARCHAR(255),
     note TEXT,
     date_time TIMESTAMP WITH TIME ZONE,

@@ -51,7 +51,7 @@ class DataLayer {
             ],
             'expenses': [
                 'id', 'amount', 'category', 'remark', 'patientId', 'patientName', 
-                'note', 'dateTime', 'doctorName', 'doctor_name', 'itemName', 'item_name', 'expenseType', 'expense_type', 
+                'note', 'dateTime', 'doctorId', 'doctor_id', 'doctorName', 'doctor_name', 'itemName', 'item_name', 'expenseType', 'expense_type', 
                 'customTypeName', 'custom_type_name', 'customIcon', 'custom_icon', 'appointmentId', 'appointment_id',
                 'createdAt', 'createdTime', 'updatedAt', 'timestamp'
             ],
@@ -789,7 +789,8 @@ class DataLayer {
                 }
 
                 // Special handling for array columns: ensure value is an array if coming from a string field
-                if (field === 'linked_lab_ids' && typeof value === 'string' && value !== "") {
+                const arrayFields = ['selected_tests', 'pending_tests', 'linked_lab_ids'];
+                if (arrayFields.includes(field) && typeof value === 'string' && value !== "") {
                     value = [value];
                 }
 
@@ -842,7 +843,10 @@ class DataLayer {
                 // Remove from local array in-place to maintain references
                 const arrayName = this.tableToArrayName(table);
                 if (window[arrayName] && Array.isArray(window[arrayName])) {
-                    const idx = window[arrayName].findIndex(item => (item.id || item.labId || item.AppointmentID || item.PatientID) === id);
+                    const idx = window[arrayName].findIndex(item => {
+                        const itemId = item.id || item.labId || item.AppointmentID || item.PatientID || item.DoctorID || item.InstructionID || item.ExpenseID || item.LabID || (typeof item === 'string' ? item : null);
+                        return itemId === id;
+                    });
                     if (idx > -1) {
                         window[arrayName].splice(idx, 1);
                         TWOK_LOGGER.sync(`[DataLayer] Removed ${id} from window.${arrayName} in-place`);
@@ -893,19 +897,18 @@ class DataLayer {
             }
             // 2. Queue for cloud sync (using database format)
             const syncManager = window.twokSyncManager || window.SyncManager;
-            if (syncManager) {
-                const dbData = operation === 'delete' ? null : this.mapToDb(table, sanitizedData);
-                
-                syncManager.queue({
-                    table: this.arrayNameToTable(table), // Ensure table name matches DB
-                    operation: operation === 'delete' ? 'delete' : 'upsert',
-                    data: dbData,
-                    id: id || (sanitizedData ? sanitizedData.id : null)
-                });
-                TWOK_LOGGER.sync(`[DataLayer] ✅ Saved locally and queued for sync: ${operation} ${table}`);
-            } else {
-                console.warn('[DataLayer] SyncManager not found, data only saved locally');
+            if (!syncManager) {
+                throw new Error('SyncManager not available - cannot queue sync operation');
             }
+            const dbData = operation === 'delete' ? null : this.mapToDb(table, sanitizedData);
+            
+            syncManager.queue({
+                table: this.arrayNameToTable(table),
+                operation: operation === 'delete' ? 'delete' : 'upsert',
+                data: dbData,
+                id: id || (sanitizedData ? sanitizedData.id : null)
+            });
+            TWOK_LOGGER.sync(`[DataLayer] ✅ Saved locally and queued for sync: ${operation} ${table}`);
         } catch (error) {
             console.error('[DataLayer] Save with sync failed:', error);
             throw error;

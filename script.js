@@ -131,6 +131,19 @@ function toLocalISOString(date = new Date()) {
 }
 
 /**
+ * Convert a datetime-local value (local time, no timezone) to ISO string with timezone offset
+ * Preserves the local date part for filtering while letting Supabase interpret correctly
+ */
+function localToISOWithOffset(localStr) {
+    if (!localStr) return '';
+    const offset = -new Date().getTimezoneOffset();
+    const sign = offset >= 0 ? '+' : '-';
+    const h = String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0');
+    const m = String(Math.abs(offset) % 60).padStart(2, '0');
+    return localStr + `${sign}${h}:${m}`;
+}
+
+/**
  * Initialize WebSocket connection for real-time TV display updates
  */
 function initWebSocket() {
@@ -1402,7 +1415,7 @@ async function updateNotedToBookedStatus() {
         // If status should now be 'Booked', update it
         if (newStatus === 'Booked') {
             appt.status = 'Booked';
-            appt.bookedTime = toLocalISOString(now);
+            appt.bookedTime = now.toISOString();
             appt.autoBooked = true;
             updated = true;
             updatedIds.push(appt.id);
@@ -2032,7 +2045,7 @@ async function printBarcodeBluetooth(patientId, patientName, patientAge, patient
             return;
         }
         console.log('Using characteristic:', characteristic.uuid);
-        const stickerMmW = 40;
+        const stickerMmW = 50;
         const stickerMmH = 30;
         const dpi = 203;
         const dotsPerMm = dpi / 25.4;
@@ -2076,7 +2089,7 @@ async function printBarcodeBluetooth(patientId, patientName, patientAge, patient
         y += 1 * scale;
         ctx.textAlign = 'center';
         if (typeof JsBarcode !== 'undefined') {
-            const barcodeMmW = 40;
+            const barcodeMmW = 50;
             const barcodeH = Math.min(Math.max(canvas.height - y - pad, 80 * scale), 100 * scale);
             const barcodeTargetW = Math.round(barcodeMmW * dotsPerMm * scale);
             const barcodeCanvas = document.createElement('canvas');
@@ -3770,7 +3783,7 @@ async function markAppointmentBooked(appointmentId) {
 
     const appt = appointments[index];
     appt.status = 'Booked';
-    appt.bookedTime = toLocalISOString(new Date());
+        appt.bookedTime = new Date().toISOString();
     await saveAppointmentsToStorage(appointmentId);
     renderAppointmentTable();
     updateQueueSummary();
@@ -3799,7 +3812,7 @@ async function markAppointmentArrived(appointmentId) {
 
     const appt = appointments[index];
     appt.status = 'Arrived';
-    appt.arrivalTime = toLocalISOString(new Date());
+    appt.arrivalTime = new Date().toISOString();
 
     // Echo Urgent logic: set waiting turns from settings
     if (appt.bookingType === 'Echo Urgent') {
@@ -3880,7 +3893,7 @@ async function startConsultation(appointmentId) {
     const appt = appointments[index];
     appt.status = 'In Consult';
     appt.isNext = false; // Clear locked status when starting
-    appt.consultStartTime = toLocalISOString(new Date());
+    appt.consultStartTime = new Date().toISOString();
     appt.penaltyTurns = 0; // Clear any penalty turns when consultation starts
     
     // Reduce penalty turns for other waiting patients if this is the target doctor
@@ -3961,7 +3974,7 @@ async function handleInvestigationYes() {
 
     // Mark the patient as investigated
     appointments[index].status = 'Investigation';
-    appointments[index].investigationOrderedTime = toLocalISOString(new Date());
+    appointments[index].investigationOrderedTime = new Date().toISOString();
     
     await saveAppointmentsToStorage([currentConsultingAppointment]);
 
@@ -4059,7 +4072,7 @@ async function handleInvestigationNo() {
 
     const appt = appointments[index];
     appt.status = 'Done';
-    appt.completedTime = toLocalISOString(new Date());
+    appt.completedTime = new Date().toISOString();
 
     await saveAppointmentsToStorage([currentConsultingAppointment]);
 
@@ -5301,7 +5314,17 @@ function loadAppointmentToForm(appointmentId) {
     elements.patientInfoDisplay.style.display = 'grid';
     elements.appointmentDoctor.value = a.doctorName;
     elements.appointmentDoctorId.value = a.doctorId || '';
-    elements.appointmentDateTime.value = a.appointmentTime ? a.appointmentTime.slice(0, 16) : '';
+    if (a.appointmentTime) {
+        const dt = new Date(a.appointmentTime);
+        if (!isNaN(dt.getTime())) {
+            dt.setMinutes(dt.getMinutes() - dt.getTimezoneOffset());
+            elements.appointmentDateTime.value = dt.toISOString().slice(0, 16);
+        } else {
+            elements.appointmentDateTime.value = '';
+        }
+    } else {
+        elements.appointmentDateTime.value = '';
+    }
     elements.appointmentBookingType.value = a.bookingType;
     elements.appointmentBookingNumber.value = a.bookingNumber !== null ? a.bookingNumber : '';
     elements.appointmentStatus.value = a.status;
@@ -5330,12 +5353,39 @@ function loadAppointmentToForm(appointmentId) {
     openAppointmentFormModal();
 }
 
+function setAppointmentButtonsSaving(isSaving) {
+    const mainBtn = elements.appointmentSaveBtn;
+    const mainText = elements.appointmentSaveBtnText;
+    if (mainBtn) {
+        mainBtn.disabled = isSaving;
+        mainText.textContent = isSaving ? 'Saving...' : 'Save Appointment';
+        mainBtn.style.opacity = isSaving ? '0.7' : '';
+        mainBtn.style.cursor = isSaving ? 'not-allowed' : '';
+    }
+    const calBtn = elements.calendarApptSaveBtn;
+    const calText = elements.calendarApptSaveBtnText;
+    if (calBtn) {
+        calBtn.disabled = isSaving;
+        calText.textContent = isSaving ? 'Saving...' : 'Save Appointment';
+        calBtn.style.opacity = isSaving ? '0.7' : '';
+        calBtn.style.cursor = isSaving ? 'not-allowed' : '';
+    }
+    if (!isSaving) {
+        window._savingAppointment = false;
+    }
+}
+
 async function saveAppointment(e) {
     e.preventDefault();
+    if (window._savingAppointment) return;
+    window._savingAppointment = true;
+    setAppointmentButtonsSaving(true);
 
-    const patientName = elements.appointmentPatient.value.trim();
+    try {
+        const patientName = elements.appointmentPatient.value.trim();
     const doctorName = elements.appointmentDoctor.value.trim();
-    const dateTime = elements.appointmentDateTime.value;
+    const dateTimeLocal = elements.appointmentDateTime.value;
+    const dateTime = dateTimeLocal ? new Date(dateTimeLocal).toISOString() : '';
     const bookingType = elements.appointmentBookingType.value;
     const manualStatus = elements.appointmentStatus.value;
 
@@ -5344,7 +5394,7 @@ async function saveAppointment(e) {
     let status;
     if (!appointmentIsEditing && doctorName === TARGET_DOCTOR_NAME) {
         // For new Dr. Soe Chan Myae appointments, auto-determine based on date
-        status = determineAppointmentStatus(doctorName, dateTime);
+        status = determineAppointmentStatus(doctorName, dateTimeLocal);
     } else {
         // For existing appointments or other doctors, use the manually selected status
         status = manualStatus || 'Noted';
@@ -5373,7 +5423,7 @@ async function saveAppointment(e) {
     }
 
     // Calculate booking numbers for both Regular and VIP
-    const appointmentDate = dateTime.split('T')[0];
+    const appointmentDate = dateTimeLocal ? dateTimeLocal.split('T')[0] : '';
     
     // If VIP booking for target doctor, check if we should show slot selection dialog
     if (bookingType === 'VIP' && doctorName === TARGET_DOCTOR_NAME && !appointmentIsEditing) {
@@ -5390,7 +5440,7 @@ async function saveAppointment(e) {
                 patientName: patientName,
                 doctorName: doctorName,
                 doctorId: resolvedDoctorId,
-                dateTime: dateTime,
+                dateTime: dateTimeLocal,
                 status: status,
                 bookingType: bookingType,
                 patientId: resolvedPatientId,
@@ -5437,8 +5487,8 @@ async function saveAppointment(e) {
         bookingNumber: bookingNumber,
         status: status,
         notes: elements.appointmentNotes.value.trim(),
-        createdAt: appointmentIsEditing ? appointments[parseInt(elements.appointmentEditIndex.value, 10)]?.createdAt : toLocalISOString(new Date()),
-        editedTime: toLocalISOString(new Date())
+        createdAt: appointmentIsEditing ? appointments[parseInt(elements.appointmentEditIndex.value, 10)]?.createdAt : new Date().toISOString(),
+        editedTime: new Date().toISOString()
     };
 
     // Clear arrival/consult times if status indicates patient hasn't arrived
@@ -5449,7 +5499,7 @@ async function saveAppointment(e) {
 
     // Track status change time
     const statusTimeKey = status.toLowerCase().replace(' ', '') + 'Time';
-    data[statusTimeKey] = toLocalISOString(new Date());
+    data[statusTimeKey] = new Date().toISOString();
 
     if (appointmentIsEditing) {
         const idx = parseInt(elements.appointmentEditIndex.value, 10);
@@ -5489,6 +5539,11 @@ async function saveAppointment(e) {
     updateQueueSummary();
     renderInstructionDoctorFilter();
     renderInstructionTableWithSaved();
+    } finally {
+        if (!vipSlotPendingData) {
+            setAppointmentButtonsSaving(false);
+        }
+    }
 }
 
 /**
@@ -5564,18 +5619,18 @@ async function completeVipAppointmentSave(selectedSlot) {
         phone: vipSlotPendingData.phone,
         doctorId: vipSlotPendingData.doctorId,
         doctorName: vipSlotPendingData.doctorName,
-        appointmentTime: vipSlotPendingData.dateTime,
+        appointmentTime: localToISOWithOffset(vipSlotPendingData.dateTime),
         bookingType: vipSlotPendingData.bookingType,
         bookingNumber: selectedSlot,
         status: finalStatus,
         notes: vipSlotPendingData.notes || '',
-        createdAt: toLocalISOString(new Date()),
-        editedTime: toLocalISOString(new Date())
+        createdAt: new Date().toISOString(),
+        editedTime: new Date().toISOString()
     };
 
     // Track status change time
     const statusTimeKey = finalStatus.toLowerCase().replace(' ', '') + 'Time';
-    data[statusTimeKey] = toLocalISOString(new Date());
+    data[statusTimeKey] = new Date().toISOString();
 
     appointments.push(data);
     await saveAppointmentsToStorage(data.id);
@@ -5596,6 +5651,7 @@ async function completeVipAppointmentSave(selectedSlot) {
 
     vipSlotPendingData = null;
     vipSlotRegularNumber = null;
+    setAppointmentButtonsSaving(false);
 }
 
 /**
@@ -5635,17 +5691,17 @@ async function useRegularNumberForVip() {
         phone: vipSlotPendingData.phone,
         doctorId: vipSlotPendingData.doctorId,
         doctorName: vipSlotPendingData.doctorName,
-        appointmentTime: vipSlotPendingData.dateTime,
+        appointmentTime: localToISOWithOffset(vipSlotPendingData.dateTime),
         bookingType: vipSlotPendingData.bookingType,
         bookingNumber: regularNumber,
         status: finalStatus,
         notes: vipSlotPendingData.notes || '',
-        createdAt: toLocalISOString(new Date()),
-        editedTime: toLocalISOString(new Date())
+        createdAt: new Date().toISOString(),
+        editedTime: new Date().toISOString()
     };
 
     const statusTimeKey = finalStatus.toLowerCase().replace(' ', '') + 'Time';
-    data[statusTimeKey] = toLocalISOString(new Date());
+    data[statusTimeKey] = new Date().toISOString();
 
     appointments.push(data);
     await saveAppointmentsToStorage(data.id);
@@ -5666,6 +5722,7 @@ async function useRegularNumberForVip() {
     vipSlotPendingData = null;
     vipSlotRegularNumber = null;
     closeVipSlotDialog();
+    setAppointmentButtonsSaving(false);
 }
 
 /**
@@ -5675,6 +5732,7 @@ function closeVipSlotDialog() {
     elements.vipSlotDialog.classList.add('hidden');
     vipSlotPendingData = null;
     vipSlotRegularNumber = null;
+    setAppointmentButtonsSaving(false);
 }
 
 function editAppointment(event, appointmentId) {
@@ -5993,20 +6051,24 @@ function recalculateCalendarBookingNumber() {
  */
 async function saveCalendarAppointment(e) {
     e.preventDefault();
+    if (window._savingAppointment) return;
+    window._savingAppointment = true;
+    setAppointmentButtonsSaving(true);
 
-    const patientName = elements.calendarApptPatient.value.trim();
+    try {
+        const patientName = elements.calendarApptPatient.value.trim();
     const doctorName = elements.calendarApptDoctor.value.trim();
-    const dateTime = elements.calendarApptDateTime.value;
+    const dateTimeLocal = elements.calendarApptDateTime.value;
     const bookingType = elements.calendarApptBookingType.value;
     const status = elements.calendarApptStatus.value;
 
     if (!patientName) { showNotification('Patient name is required', 'error'); return; }
     if (!doctorName) { showNotification('Doctor name is required', 'error'); return; }
-    if (!dateTime) { showNotification('Date & Time is required', 'error'); return; }
+    if (!dateTimeLocal) { showNotification('Date & Time is required', 'error'); return; }
     if (!bookingType) { showNotification('Booking type is required', 'error'); return; }
     if (!status) { showNotification('Status is required', 'error'); return; }
 
-    const appointmentDate = dateTime.split('T')[0];
+    const appointmentDate = dateTimeLocal.split('T')[0];
 
     // If VIP booking for target doctor, check if we should show slot selection dialog
     if (bookingType === 'VIP' && doctorName === TARGET_DOCTOR_NAME) {
@@ -6040,7 +6102,7 @@ async function saveCalendarAppointment(e) {
                 patientName: patientName,
                 doctorName: doctorName,
                 doctorId: resolvedDoctorId,
-                dateTime: dateTime,
+                dateTime: dateTimeLocal,
                 status: status,
                 bookingType: bookingType,
                 patientId: resolvedPatientId,
@@ -6085,12 +6147,12 @@ async function saveCalendarAppointment(e) {
         phone: elements.calendarDisplayPatientPhone.value,
         doctorId: resolvedDoctorId,
         doctorName: doctorName,
-        appointmentTime: dateTime,
+        appointmentTime: new Date(dateTimeLocal).toISOString(),
         bookingType: bookingType,
         bookingNumber: bookingNumber,
         status: status,
         notes: elements.calendarApptNotes.value.trim(),
-        createdAt: toLocalISOString(new Date())
+        createdAt: new Date().toISOString()
     };
 
     // Clear arrival/consult times if status indicates patient hasn't arrived
@@ -6116,6 +6178,11 @@ async function saveCalendarAppointment(e) {
     // Update appointments table and queue summary
     renderAppointmentTable();
     updateQueueSummary();
+    } finally {
+        if (!vipSlotPendingData) {
+            setAppointmentButtonsSaving(false);
+        }
+    }
 }
 
 /**
@@ -7092,7 +7159,8 @@ function setupEventListeners() {
     const expenseDateTime = document.getElementById('globalExpenseDateTime');
     if (expenseDateTime) {
         const now = new Date();
-        expenseDateTime.value = toLocalISOString(now).slice(0, 16);
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        expenseDateTime.value = now.toISOString().slice(0, 16);
     }
 
     // ==================== LAB TRACKER EVENT LISTENERS ====================
@@ -7749,8 +7817,8 @@ function saveInstruction(e) {
         linkedLabIds: editId ? (instructions.find(i => i.id === editId)?.linkedLabIds || []) : [],
         contacted: editId ? (instructions.find(i => i.id === editId)?.contacted || false) : false,
         contactedAt: editId ? (instructions.find(i => i.id === editId)?.contactedAt || null) : null,
-        createdTime: editId ? instructions.find(i => i.id === editId)?.createdTime : toLocalISOString(new Date()),
-        editedTime: toLocalISOString(new Date())
+        createdTime: editId ? instructions.find(i => i.id === editId)?.createdTime : new Date().toISOString(),
+        editedTime: new Date().toISOString()
     };
 
     // Auto-link with Lab ID for "After Results" with Blood Test
@@ -8195,27 +8263,20 @@ async function deleteExpense(expenseId) {
 
     if (!confirm(`Are you sure you want to delete this expense?\n\nCategory: ${exp.category}\nAmount: ${formatCurrency(exp.amount)}`)) return;
 
-    const idx = expenses.findIndex(e => (e.id || e.ExpenseID || e.expense_id) === expenseId);
-    if (idx > -1) {
-        // Remove from IndexedDB
-        try {
-            if (window.TWOKDB) {
-                await TWOKDB.remove(TWOKDB.STORES.EXPENSES, expenseId);
-            }
-        } catch (error) {
-            console.error('[deleteExpense] Failed to delete from IndexedDB:', error);
-            showNotification('⚠️ Failed to delete expense from database', 'error');
-            return;
+    // Remove from IndexedDB (this also removes from the in-memory array via saveWithSync)
+    try {
+        if (window.TWOKDB) {
+            await TWOKDB.remove(TWOKDB.STORES.EXPENSES, expenseId);
         }
-
-        // Remove from expenses array
-        expenses.splice(idx, 1);
-        window.expenses = expenses; // Update global reference
-
-        renderExpenses();
-        renderCategorySummary();
-        showNotification('Expense deleted successfully!');
+    } catch (error) {
+        console.error('[deleteExpense] Failed to delete from IndexedDB:', error);
+        showNotification('⚠️ Failed to delete expense from database', 'error');
+        return;
     }
+
+    renderExpenses();
+    renderCategorySummary();
+    showNotification('Expense deleted successfully!');
 }
 
 /**
@@ -8960,9 +9021,10 @@ function resetLabForm() {
     pendingSection.classList.add('hidden');
     document.getElementById('labPendingTests').value = '';
 
-    // Set default datetime to now
+    // Set default datetime to now (adjusted for datetime-local input)
     const now = new Date();
-    elements.labDateTime.value = toLocalISOString(now).slice(0, 16);
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    elements.labDateTime.value = now.toISOString().slice(0, 16);
 }
 
 /**
@@ -9094,7 +9156,17 @@ function editLabRecord(labId) {
     elements.labName.value = lab.labName;
     elements.labAmount.value = lab.amount;
     elements.labStatus.value = lab.status;
-    elements.labDateTime.value = lab.dateTime ? lab.dateTime.slice(0, 16) : '';
+    if (lab.dateTime) {
+        const dt = new Date(lab.dateTime);
+        if (!isNaN(dt.getTime())) {
+            dt.setMinutes(dt.getMinutes() - dt.getTimezoneOffset());
+            elements.labDateTime.value = dt.toISOString().slice(0, 16);
+        } else {
+            elements.labDateTime.value = '';
+        }
+    } else {
+        elements.labDateTime.value = '';
+    }
 
     // Populate pending tests field
     const pendingTestsField = document.getElementById('labPendingTests');
@@ -9154,7 +9226,8 @@ function saveLabRecord(e) {
     const labName = elements.labName.value.trim();
     const amount = elements.labAmount.value.trim();
     const status = elements.labStatus.value.trim();
-    const dateTime = elements.labDateTime.value;
+    const dateTimeLocal = elements.labDateTime.value;
+    const dateTime = dateTimeLocal ? new Date(dateTimeLocal).toISOString() : '';
     const pendingTests = document.getElementById('labPendingTests').value.trim();
 
     if (!patientName) { showNotification('Patient name is required', 'error'); return; }
@@ -9162,7 +9235,7 @@ function saveLabRecord(e) {
     if (!labName) { showNotification('Lab name is required', 'error'); return; }
     if (!amount) { showNotification('Amount is required', 'error'); return; }
     if (!status) { showNotification('Status is required', 'error'); return; }
-    if (!dateTime) { showNotification('Date & Time is required', 'error'); return; }
+    if (!dateTimeLocal) { showNotification('Date & Time is required', 'error'); return; }
     
     // Validate pending tests for Partial Result Out status
     if (status === 'Partial Result Out' && !pendingTests) {

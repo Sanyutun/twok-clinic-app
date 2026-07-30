@@ -24,6 +24,10 @@ ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_patient_id_fkey;
 ALTER TABLE expenses ADD CONSTRAINT expenses_patient_id_fkey 
     FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE;
 
+ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_doctor_id_fkey;
+ALTER TABLE expenses ADD CONSTRAINT expenses_doctor_id_fkey 
+    FOREIGN KEY (doctor_id) REFERENCES doctors(id) ON DELETE CASCADE;
+
 ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_appointment_id_fkey;
 ALTER TABLE expenses ADD CONSTRAINT expenses_appointment_id_fkey 
     FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE CASCADE;

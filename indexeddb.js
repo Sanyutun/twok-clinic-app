@@ -198,6 +198,42 @@ async function getById(storeName, id) {
 }
 
 /**
+ * Try to queue an operation for sync as fallback
+ */
+async function queueFallbackSync(storeName, operation, data, id) {
+    try {
+        const manager = window.twokSyncManager || window.SyncManager;
+        if (manager && typeof manager.queue === 'function') {
+            let tableName = storeName;
+            let dbData = data;
+            if (window.DataLayer && typeof window.DataLayer.arrayNameToTable === 'function') {
+                tableName = window.DataLayer.arrayNameToTable(storeName) || storeName;
+            }
+            if (operation !== 'delete' && window.DataLayer && typeof window.DataLayer.mapToDb === 'function') {
+                dbData = window.DataLayer.mapToDb(storeName, data);
+            }
+            manager.queue({
+                table: tableName,
+                operation: operation,
+                data: operation === 'delete' ? null : dbData,
+                id: id
+            });
+            return true;
+        }
+    } catch (e) {
+        console.warn('[TWOKDB] Fallback queue failed:', e);
+    }
+    return false;
+}
+
+/**
+ * Get item ID from various ID field conventions
+ */
+function getItemId(item) {
+    return item.id || item.PatientID || item.DoctorID || item.AppointmentID || item.InstructionID || item.ExpenseID || item.LabID;
+}
+
+/**
  * Add or update an item
  * @param {string} storeName - Name of the object store
  * @param {Object} item - Item to add/update
@@ -205,11 +241,14 @@ async function getById(storeName, id) {
  * @returns {Promise<string>} - The ID of the added/updated item
  */
 async function put(storeName, item, skipSync = false) {
+    let syncHandled = false;
+
     // 1. Trigger cloud sync if not skipped
     if (!skipSync && window.DataLayer && typeof window.DataLayer.saveWithSync === 'function') {
         try {
-            await window.DataLayer.saveWithSync(storeName, 'upsert', item, item.id || item.PatientID || item.DoctorID || item.AppointmentID || item.InstructionID || item.ExpenseID || item.LabID);
-            return item.id || item.PatientID || item.DoctorID || item.AppointmentID || item.InstructionID || item.ExpenseID || item.LabID;
+            await window.DataLayer.saveWithSync(storeName, 'upsert', item, getItemId(item));
+            syncHandled = true;
+            return getItemId(item);
         } catch (error) {
             console.warn('[TWOKDB] Cloud sync failed in put(), falling back to local only:', error);
         }
@@ -219,51 +258,50 @@ async function put(storeName, item, skipSync = false) {
     if (storageAdapterInstance && !isProcessingAdapter) {
         isProcessingAdapter = true;
         try {
-            const isUpdate = !!(item.id || item.PatientID || item.DoctorID || item.AppointmentID || item.InstructionID || item.ExpenseID || item.LabID);
+            const isUpdate = !!(getItemId(item));
             
             switch (storeName) {
                 case STORES.PATIENTS:
                     if (isUpdate) await storageAdapterInstance.updatePatient(item.PatientID || item.id, item, skipSync);
                     else await storageAdapterInstance.addPatient(item, skipSync);
-                    if (!skipSync) return item.id || item.PatientID;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'upsert', item, getItemId(item)); return getItemId(item); }
                     break;
                 case STORES.DOCTORS:
                     if (isUpdate) await storageAdapterInstance.updateDoctor(item.DoctorID || item.id, item, skipSync);
                     else await storageAdapterInstance.addDoctor(item, skipSync);
-                    if (!skipSync) return item.id || item.DoctorID;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'upsert', item, getItemId(item)); return getItemId(item); }
                     break;
                 case STORES.APPOINTMENTS:
                     if (isUpdate) await storageAdapterInstance.updateAppointment(item.AppointmentID || item.id, item, skipSync);
                     else await storageAdapterInstance.addAppointment(item, skipSync);
-                    if (!skipSync) return item.id || item.AppointmentID;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'upsert', item, getItemId(item)); return getItemId(item); }
                     break;
                 case STORES.INSTRUCTIONS:
                     await storageAdapterInstance.addInstruction(item, skipSync);
-                    if (!skipSync) return item.id || item.InstructionID;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'upsert', item, getItemId(item)); return getItemId(item); }
                     break;
                 case STORES.EXPENSES:
                     await storageAdapterInstance.addExpense(item, skipSync);
-                    if (!skipSync) return item.id || item.ExpenseID;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'upsert', item, getItemId(item)); return getItemId(item); }
                     break;
                 case STORES.LAB_TRACKER:
                     if (isUpdate) await storageAdapterInstance.updateLab(item.LabID || item.labId || item.id, item, skipSync);
                     else await storageAdapterInstance.addLab(item, skipSync);
-                    if (!skipSync) return item.id || item.LabID;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'upsert', item, getItemId(item)); return getItemId(item); }
                     break;
                 case STORES.ADDRESSES:
                     storageAdapterInstance.addAddress(item);
-                    if (!skipSync) return item;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'upsert', item, getItemId(item)); return getItemId(item); }
                     break;
                 case STORES.SPECIALITIES:
                     storageAdapterInstance.addSpeciality(item);
-                    if (!skipSync) return item;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'upsert', item, getItemId(item)); return getItemId(item); }
                     break;
                 case STORES.HOSPITALS:
                     storageAdapterInstance.addHospital(item);
-                    if (!skipSync) return item;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'upsert', item, getItemId(item)); return getItemId(item); }
                     break;
                 default:
-                    // Fall back to IndexedDB
                     break;
             }
         } catch (error) {
@@ -275,13 +313,20 @@ async function put(storeName, item, skipSync = false) {
     
     // Fall back to IndexedDB
     const transaction = await getTransaction(storeName, 'readwrite');
-    return new Promise((resolve, reject) => {
+    await new Promise((resolve, reject) => {
         const store = transaction.objectStore(storeName);
         const request = store.put(item);
 
-        request.onsuccess = () => resolve(item.id);
+        request.onsuccess = () => resolve();
         request.onerror = () => reject(new Error('Failed to put item: ' + request.error));
     });
+
+    // Fallback queue if sync wasn't handled by DataLayer
+    if (!skipSync && !syncHandled) {
+        await queueFallbackSync(storeName, 'upsert', item, getItemId(item));
+    }
+
+    return getItemId(item);
 }
 
 /**
@@ -292,10 +337,13 @@ async function put(storeName, item, skipSync = false) {
  * @returns {Promise<void>}
  */
 async function remove(storeName, id, skipSync = false) {
+    let syncHandled = false;
+
     // 1. Trigger cloud sync if not skipped
     if (!skipSync && window.DataLayer && typeof window.DataLayer.saveWithSync === 'function') {
         try {
             await window.DataLayer.saveWithSync(storeName, 'delete', null, id);
+            syncHandled = true;
             return;
         } catch (error) {
             console.warn('[TWOKDB] Cloud sync failed in remove(), falling back to local only:', error);
@@ -309,30 +357,29 @@ async function remove(storeName, id, skipSync = false) {
             switch (storeName) {
                 case STORES.PATIENTS:
                     await storageAdapterInstance.deletePatient(id, skipSync);
-                    if (!skipSync) return;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'delete', null, id); return; }
                     break;
                 case STORES.DOCTORS:
                     await storageAdapterInstance.deleteDoctor(id, skipSync);
-                    if (!skipSync) return;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'delete', null, id); return; }
                     break;
                 case STORES.APPOINTMENTS:
                     await storageAdapterInstance.deleteAppointment(id, skipSync);
-                    if (!skipSync) return;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'delete', null, id); return; }
                     break;
                 case STORES.ADDRESSES:
                     storageAdapterInstance.deleteAddress(id);
-                    if (!skipSync) return;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'delete', null, id); return; }
                     break;
                 case STORES.SPECIALITIES:
                     storageAdapterInstance.deleteSpeciality(id);
-                    if (!skipSync) return;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'delete', null, id); return; }
                     break;
                 case STORES.HOSPITALS:
                     storageAdapterInstance.deleteHospital(id);
-                    if (!skipSync) return;
+                    if (!skipSync) { if (!syncHandled) await queueFallbackSync(storeName, 'delete', null, id); return; }
                     break;
                 default:
-                    // Fall back to IndexedDB
                     break;
             }
         } catch (error) {
@@ -344,13 +391,18 @@ async function remove(storeName, id, skipSync = false) {
     
     // Fall back to IndexedDB
     const transaction = await getTransaction(storeName, 'readwrite');
-    return new Promise((resolve, reject) => {
+    await new Promise((resolve, reject) => {
         const store = transaction.objectStore(storeName);
         const request = store.delete(id);
 
         request.onsuccess = () => resolve();
         request.onerror = () => reject(new Error('Failed to delete item: ' + request.error));
     });
+
+    // Fallback queue if sync wasn't handled by DataLayer
+    if (!skipSync && !syncHandled) {
+        await queueFallbackSync(storeName, 'delete', null, id);
+    }
 }
 
 /**
