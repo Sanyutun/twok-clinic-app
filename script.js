@@ -349,19 +349,11 @@ const elements = {
     appointmentNoResultsMessage: document.getElementById('appointmentNoResultsMessage'),
     addNewAppointmentLink: document.getElementById('addNewAppointmentLink'),
     newAppointmentBtn: document.getElementById('newAppointmentBtn'),
-    appointmentCount: document.getElementById('appointmentCount'),
     todayAppointmentsBtn: document.getElementById('todayAppointmentsBtn'),
     appointmentDateFilter: document.getElementById('appointmentDateFilter'),
     appointmentDoctorFilter: document.getElementById('appointmentDoctorFilter'),
-    appointmentTable: document.getElementById('appointmentTable'),
-    appointmentTableBody: document.getElementById('appointmentTableBody'),
-    appointmentEmptyTableMessage: document.getElementById('appointmentEmptyTableMessage'),
-    otherAppointmentCount: document.getElementById('otherAppointmentCount'),
-    otherAppointmentTable: document.getElementById('otherAppointmentTable'),
-    otherAppointmentTableBody: document.getElementById('otherAppointmentTableBody'),
-    otherAppointmentEmptyTableMessage: document.getElementById('otherAppointmentEmptyTableMessage'),
-    otherAppointmentPagination: document.getElementById('otherAppointmentPagination'),
-    appointmentEmptyNewBtn: document.getElementById('appointmentEmptyNewBtn'),
+    queueSummaryRows: document.getElementById('queueSummaryRows'),
+    appointmentTablesContainer: document.getElementById('appointmentTablesContainer'),
     appointmentFormModal: document.getElementById('appointmentFormModal'),
     closeAppointmentFormModal: document.getElementById('closeAppointmentFormModal'),
     appointmentFormTitle: document.getElementById('appointmentFormTitle'),
@@ -394,9 +386,6 @@ const elements = {
     appointmentClearBtn: document.getElementById('appointmentClearBtn'),
     appointmentCancelBtn: document.getElementById('appointmentCancelBtn'),
     queueSummary: document.getElementById('queueSummary'),
-    waitingCount: document.getElementById('waitingCount'),
-    inConsultCount: document.getElementById('inConsultCount'),
-    doneCount: document.getElementById('doneCount'),
     nextPatientName: document.getElementById('nextPatientName'),
     selectedPatientName: document.getElementById('selectedPatientName'),
     currentConsultName: document.getElementById('currentConsultName'),
@@ -603,7 +592,6 @@ const elements = {
     // Pagination Containers
     patientPagination: document.getElementById('patientPagination'),
     doctorPagination: document.getElementById('doctorPagination'),
-    appointmentPagination: document.getElementById('appointmentPagination'),
     instructionPagination: document.getElementById('instructionPagination'),
     labPagination: document.getElementById('labPagination')
 };
@@ -627,8 +615,8 @@ let currentSection = 'patient'; // Track current active section
 const ITEMS_PER_PAGE = 25; // Optimized for performance
 let patientCurrentPage = 1;
 let doctorCurrentPage = 1;
-let appointmentCurrentPage = 1;
-let appointmentOtherCurrentPage = 1;
+let appointmentPages = {}; // Per-doctor current pages, keyed by doctor name
+let appointmentTableSections = {}; // Per-doctor rendered table section handles
 let instructionCurrentPage = 1;
 let labCurrentPage = 1;
 
@@ -675,16 +663,13 @@ function changeDoctorPage(page) {
     elements.doctorSection.scrollIntoView({ behavior: 'smooth' });
 }
 
-function changeAppointmentPage(page) {
-    appointmentCurrentPage = page;
+function changeAppointmentPageFor(doctorName, page) {
+    appointmentPages[doctorName] = page;
     renderAppointmentTable();
-    elements.appointmentSection.scrollIntoView({ behavior: 'smooth' });
-}
-
-function changeOtherAppointmentPage(page) {
-    appointmentOtherCurrentPage = page;
-    renderAppointmentTable();
-    elements.appointmentSection.scrollIntoView({ behavior: 'smooth' });
+    const sectionObj = appointmentTableSections[doctorName];
+    if (sectionObj && sectionObj.section) {
+        sectionObj.section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 }
 
 function changeInstructionPage(page) {
@@ -702,8 +687,7 @@ function changeLabPage(page) {
 // Expose pagination functions globally
 window.changePatientPage = changePatientPage;
 window.changeDoctorPage = changeDoctorPage;
-window.changeAppointmentPage = changeAppointmentPage;
-window.changeOtherAppointmentPage = changeOtherAppointmentPage;
+window.changeAppointmentPageFor = changeAppointmentPageFor;
 window.changeInstructionPage = changeInstructionPage;
 window.changeLabPage = changeLabPage;
 
@@ -828,11 +812,12 @@ function pushToUndoHistory(appointmentId) {
  * Update the Undo button visibility based on history stack
  */
 function updateUndoButtonVisibility() {
-    if (elements.undoAppointmentBtn) {
+    const undoBtn = (elements.appointmentTablesContainer && elements.appointmentTablesContainer.querySelector('#undoAppointmentBtn')) || elements.undoAppointmentBtn;
+    if (undoBtn) {
         if (appointmentActionHistory.length > 0) {
-            elements.undoAppointmentBtn.style.display = 'inline-flex';
+            undoBtn.style.display = 'inline-flex';
         } else {
-            elements.undoAppointmentBtn.style.display = 'none';
+            undoBtn.style.display = 'none';
         }
     }
 }
@@ -3084,6 +3069,10 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function escapeAttribute(text) {
+    return String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
+}
+
 function formatDateTime(isoString) {
     if (!isoString) return '-';
     const date = new Date(isoString);
@@ -3290,23 +3279,150 @@ function renderAppointmentTable(filteredAppointments = null) {
         }
     }
 
-    const dscmData = data.filter(a => a.doctorName === TARGET_DOCTOR_NAME);
-    const otherData = data.filter(a => a.doctorName !== TARGET_DOCTOR_NAME);
+    // Group appointments by doctor
+    const doctorGroups = new Map();
+    data.forEach(a => {
+        const doctorName = a.doctorName || 'Unknown';
+        if (!doctorGroups.has(doctorName)) doctorGroups.set(doctorName, []);
+        doctorGroups.get(doctorName).push(a);
+    });
 
-    const dscmPages = Math.ceil(dscmData.length / ITEMS_PER_PAGE) || 1;
-    if (appointmentCurrentPage > dscmPages) appointmentCurrentPage = dscmPages;
-    if (appointmentCurrentPage < 1) appointmentCurrentPage = 1;
+    // Doctor order: Dr. Soe Chan Myae first, then alphabetical by name
+    const doctorNames = [...doctorGroups.keys()].sort((a, b) => {
+        if (a === TARGET_DOCTOR_NAME) return -1;
+        if (b === TARGET_DOCTOR_NAME) return 1;
+        return a.localeCompare(b);
+    });
 
-    const otherPages = Math.ceil(otherData.length / ITEMS_PER_PAGE) || 1;
-    if (appointmentOtherCurrentPage > otherPages) appointmentOtherCurrentPage = otherPages;
-    if (appointmentOtherCurrentPage < 1) appointmentOtherCurrentPage = 1;
+    // Remove sections for doctors that no longer have appointments
+    Object.keys(appointmentTableSections).forEach(doc => {
+        if (!doctorGroups.has(doc)) {
+            appointmentTableSections[doc].section.remove();
+            delete appointmentTableSections[doc];
+            delete appointmentPages[doc];
+        }
+    });
 
-    renderSingleAppointmentTable(dscmData, elements.appointmentTableBody, elements.appointmentTable, elements.appointmentEmptyTableMessage, elements.appointmentPagination, elements.appointmentCount, appointmentCurrentPage, 'changeAppointmentPage', true);
-    renderSingleAppointmentTable(otherData, elements.otherAppointmentTableBody, elements.otherAppointmentTable, elements.otherAppointmentEmptyTableMessage, elements.otherAppointmentPagination, elements.otherAppointmentCount, appointmentOtherCurrentPage, 'changeOtherAppointmentPage', false);
+    if (doctorNames.length === 0) {
+        elements.appointmentTablesContainer.innerHTML = `
+            <div class="empty-message">
+                <p>No appointments for any doctor.</p>
+            </div>
+        `;
+        return;
+    }
+
+    doctorNames.forEach(doctorName => {
+        const isDscm = doctorName === TARGET_DOCTOR_NAME;
+        renderSingleDoctorAppointmentTable(doctorName, doctorGroups.get(doctorName), isDscm);
+    });
 }
 
-function renderSingleAppointmentTable(data, tableBodyEl, tableEl, emptyMsgEl, paginationEl, countEl, currentPage, pageChangeFunc, isDscm) {
+/**
+ * Get or create a per-doctor appointment table section within the container
+ */
+function getDoctorAppointmentSection(doctorName) {
+    if (appointmentTableSections[doctorName]) return appointmentTableSections[doctorName];
+
+    const section = document.createElement('section');
+    section.className = 'table-section';
+    section.dataset.doctor = doctorName;
+    section.dataset.dscm = doctorName === TARGET_DOCTOR_NAME ? 'true' : 'false';
+
+    const header = document.createElement('div');
+    header.className = 'table-header';
+
+    const headerTitle = document.createElement('h2');
+    headerTitle.textContent = doctorName === TARGET_DOCTOR_NAME ? `👨‍⚕️ ${doctorName}` : `🏥 ${doctorName}`;
+
+    const headerActions = document.createElement('div');
+    headerActions.className = 'table-header-actions';
+
+    const undoBtn = document.createElement('button');
+    undoBtn.type = 'button';
+    undoBtn.id = 'undoAppointmentBtn';
+    undoBtn.className = 'btn btn-warning btn-sm';
+    undoBtn.title = 'Undo Last Action (Ctrl+Z)';
+    undoBtn.style.display = 'none';
+    undoBtn.style.marginRight = '10px';
+    undoBtn.textContent = '↩️ Undo';
+
+    const countEl = document.createElement('span');
+    countEl.className = 'record-count';
+
+    if (doctorName === TARGET_DOCTOR_NAME) headerActions.appendChild(undoBtn);
+    headerActions.appendChild(countEl);
+
+    header.appendChild(headerTitle);
+    header.appendChild(headerActions);
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table-wrapper';
+
+    const table = document.createElement('table');
+    table.innerHTML = `
+        <thead>
+            <tr>
+                <th data-sort="bookingNumber">Queue</th>
+                <th data-sort="patientName">Patient</th>
+                <th data-sort="age">Age</th>
+                <th data-sort="phone">Phone</th>
+                <th data-sort="doctorName">Doctor</th>
+                <th data-sort="appointmentTime">Time</th>
+                <th data-sort="bookingType">Type</th>
+                <th data-sort="status">Status</th>
+                <th data-sort="arrivalTime">Arrival Time</th>
+                <th>Penalty</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    `;
+    const tableBody = table.querySelector('tbody');
+
+    const emptyMsg = document.createElement('div');
+    emptyMsg.className = 'empty-message hidden';
+    emptyMsg.innerHTML = `
+        <p>No appointments for ${escapeHtml(doctorName)}.</p>
+        <button type="button" class="btn btn-primary" data-action="schedule-appointment" data-doctor="${escapeAttribute(doctorName)}">+ Schedule First Appointment</button>
+    `;
+
+    wrapper.appendChild(table);
+    wrapper.appendChild(emptyMsg);
+
+    const pagination = document.createElement('div');
+    pagination.className = 'pagination-container';
+
+    section.appendChild(header);
+    section.appendChild(wrapper);
+    section.appendChild(pagination);
+
+    elements.appointmentTablesContainer.appendChild(section);
+
+    const sectionObj = { section, table, tableBody, emptyMsg, pagination, countEl };
+    appointmentTableSections[doctorName] = sectionObj;
+    return sectionObj;
+}
+
+/**
+ * Escape a string for embedding inside a single-quoted JS string in an inline onclick attribute
+ */
+function escapeJsAttr(str) {
+    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function renderSingleDoctorAppointmentTable(doctorName, data, isDscm) {
+    const sectionObj = getDoctorAppointmentSection(doctorName);
+    const tableBodyEl = sectionObj.tableBody;
+    const tableEl = sectionObj.table;
+    const emptyMsgEl = sectionObj.emptyMsg;
+    const paginationEl = sectionObj.pagination;
+    const countEl = sectionObj.countEl;
+
     countEl.textContent = `${data.length} appointment${data.length !== 1 ? 's' : ''}`;
+    sectionObj.section.classList.remove('hidden');
+
+    let currentPage = appointmentPages[doctorName] || 1;
 
     if (data.length === 0) {
         tableBodyEl.innerHTML = '';
@@ -3405,6 +3521,7 @@ function renderSingleAppointmentTable(data, tableBodyEl, tableEl, emptyMsgEl, pa
     } else if (currentPage < 1) {
         currentPage = 1;
     }
+    appointmentPages[doctorName] = currentPage;
 
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     const paginatedData = sortedData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
@@ -3498,7 +3615,7 @@ function renderSingleAppointmentTable(data, tableBodyEl, tableEl, emptyMsgEl, pa
         });
     });
 
-    renderPagination(paginationEl, totalItems, currentPage, pageChangeFunc);
+    renderPagination(paginationEl, totalItems, currentPage, `changeAppointmentPageFor('${escapeJsAttr(doctorName)}', `);
 }
 
 // ==================== APPOINTMENT WORKFLOW ACTIONS ====================
@@ -4185,8 +4302,8 @@ function sortAppointments(field) {
         appointmentCurrentSort.direction = 'asc';
     }
 
-    document.querySelectorAll('#appointmentTable th[data-sort], #otherAppointmentTable th[data-sort]').forEach(th => th.classList.remove('sorted'));
-    document.querySelectorAll(`#appointmentTable th[data-sort="${field}"], #otherAppointmentTable th[data-sort="${field}"]`).forEach(th => th.classList.add('sorted'));
+    document.querySelectorAll('#appointmentTablesContainer th[data-sort]').forEach(th => th.classList.remove('sorted'));
+    document.querySelectorAll(`#appointmentTablesContainer th[data-sort="${field}"]`).forEach(th => th.classList.add('sorted'));
 
     let sorted = [...appointments];
     sorted.sort((a, b) => {
@@ -4237,7 +4354,7 @@ function searchAppointments(searchTerm) {
     const dateFilter = elements.appointmentDateFilter.value;
     const doctorFilter = elements.appointmentDoctorFilter.value;
 
-    appointmentCurrentPage = 1;
+    Object.keys(appointmentPages).forEach(k => delete appointmentPages[k]);
 
     // If no filters are active, show all appointments
     if (!term && !dateFilter && !doctorFilter) {
@@ -4277,14 +4394,48 @@ function updateQueueSummary() {
     const today = toLocalDateString(new Date());
     const todayAppointments = appointments.filter(a => a.appointmentTime && a.appointmentTime.startsWith(today));
 
-    // --- Dr. Soe Chan Myae ---
-    const doctorAppointments = todayAppointments.filter(a => a.doctorName === TARGET_DOCTOR_NAME);
+    // Group today's appointments by doctor
+    const doctorGroups = new Map();
+    todayAppointments.forEach(a => {
+        const doctorName = a.doctorName || 'Unknown';
+        if (!doctorGroups.has(doctorName)) doctorGroups.set(doctorName, []);
+        doctorGroups.get(doctorName).push(a);
+    });
 
-    const dWaiting = doctorAppointments.filter(a =>
-        ['Noted', 'Booked', 'Arrived', 'Investigation'].includes(a.status)
-    ).length;
-    const dInConsult = doctorAppointments.filter(a => a.status === 'In Consult').length;
-    const dDone = doctorAppointments.filter(a => a.status === 'Done').length;
+    // Doctor order: Dr. Soe Chan Myae first, then alphabetical by name
+    const doctorNames = [...doctorGroups.keys()].sort((a, b) => {
+        if (a === TARGET_DOCTOR_NAME) return -1;
+        if (b === TARGET_DOCTOR_NAME) return 1;
+        return a.localeCompare(b);
+    });
+
+    // --- Generate one queue summary row per doctor ---
+    let rowsHtml = '';
+    doctorNames.forEach(doctorName => {
+        const doctorAppointments = doctorGroups.get(doctorName);
+        const waiting = doctorAppointments.filter(a =>
+            ['Noted', 'Booked', 'Arrived', 'Investigation'].includes(a.status)
+        ).length;
+        const inConsult = doctorAppointments.filter(a => a.status === 'In Consult').length;
+        const done = doctorAppointments.filter(a => a.status === 'Done').length;
+        const isDscm = doctorName === TARGET_DOCTOR_NAME;
+        const icon = isDscm ? '👨‍⚕️' : '🏥';
+        rowsHtml += `
+            <div class="queue-table-row ${isDscm ? 'dscm-row' : 'other-row'}">
+                <span class="queue-table-cell queue-table-doctor">${icon} ${escapeHtml(doctorName)}</span>
+                <span class="queue-table-cell queue-table-stat"><span class="queue-stat-value">${waiting}</span></span>
+                <span class="queue-table-cell queue-table-stat"><span class="queue-stat-value">${inConsult}</span></span>
+                <span class="queue-table-cell queue-table-stat"><span class="queue-stat-value">${done}</span></span>
+            </div>
+        `;
+    });
+
+    if (elements.queueSummaryRows) {
+        elements.queueSummaryRows.innerHTML = rowsHtml;
+    }
+
+    // --- Next Patient / Now Serving (Dr. Soe Chan Myae) ---
+    const doctorAppointments = todayAppointments.filter(a => a.doctorName === TARGET_DOCTOR_NAME);
 
     const eligibleForNext = doctorAppointments.filter(a =>
         ['Arrived', 'Investigation', 'Booked', 'Noted'].includes(a.status)
@@ -4305,28 +4456,8 @@ function updateQueueSummary() {
         currentConsultDisplay = `${currentConsult.patientName} (#${currentConsult.bookingNumber || '-'})`;
     }
 
-    elements.waitingCount.textContent = dWaiting;
-    elements.inConsultCount.textContent = dInConsult;
-    elements.doneCount.textContent = dDone;
-    elements.nextPatientName.textContent = nextPatientDisplay;
-    elements.currentConsultName.textContent = currentConsultDisplay;
-
-    // --- Other Patients (non-DSCM) ---
-    const otherAppointments = todayAppointments.filter(a => a.doctorName !== TARGET_DOCTOR_NAME);
-
-    const oWaiting = otherAppointments.filter(a =>
-        ['Noted', 'Booked', 'Arrived', 'Investigation'].includes(a.status)
-    ).length;
-    const oInConsult = otherAppointments.filter(a => a.status === 'In Consult').length;
-    const oDone = otherAppointments.filter(a => a.status === 'Done').length;
-
-    const otherWaitingEl = document.getElementById('otherWaitingCount');
-    const otherInConsultEl = document.getElementById('otherInConsultCount');
-    const otherDoneEl = document.getElementById('otherDoneCount');
-
-    if (otherWaitingEl) otherWaitingEl.textContent = oWaiting;
-    if (otherInConsultEl) otherInConsultEl.textContent = oInConsult;
-    if (otherDoneEl) otherDoneEl.textContent = oDone;
+    if (elements.nextPatientName) elements.nextPatientName.textContent = nextPatientDisplay;
+    if (elements.currentConsultName) elements.currentConsultName.textContent = currentConsultDisplay;
 }
 
 /**
@@ -5883,6 +6014,19 @@ function openAppointmentFormModal() {
 }
 
 /**
+ * Open the appointment form modal pre-filled for a specific doctor
+ */
+function openAppointmentFormModalForDoctor(doctorName) {
+    resetAppointmentForm();
+    openAppointmentFormModal();
+    if (doctorName) {
+        const doctor = doctors.find(d => d.name === doctorName);
+        elements.appointmentDoctor.value = doctorName;
+        elements.appointmentDoctorId.value = doctor ? doctor.id : '';
+    }
+}
+
+/**
  * Create appointment from calendar event with prefilled data
  * @param {string} patientName - Patient display name
  * @param {string} patientId - Patient ID
@@ -6319,9 +6463,11 @@ function setupEventListeners() {
     elements.sidebarOverlay.addEventListener('click', closeSidebar);
 
     // Undo System
-    if (elements.undoAppointmentBtn) {
-        elements.undoAppointmentBtn.addEventListener('click', () => {
-            undoLastAppointmentAction();
+    if (elements.appointmentTablesContainer) {
+        elements.appointmentTablesContainer.addEventListener('click', (e) => {
+            if (e.target.closest('#undoAppointmentBtn')) {
+                undoLastAppointmentAction();
+            }
         });
     }
 
@@ -6741,7 +6887,15 @@ function setupEventListeners() {
 
     // New appointment button
     elements.newAppointmentBtn.addEventListener('click', openAppointmentFormModal);
-    elements.appointmentEmptyNewBtn.addEventListener('click', openAppointmentFormModal);
+
+    // Schedule First Appointment buttons inside per-doctor empty tables
+    if (elements.appointmentTablesContainer) {
+        elements.appointmentTablesContainer.addEventListener('click', (e) => {
+            const scheduleBtn = e.target.closest('[data-action="schedule-appointment"]');
+            if (!scheduleBtn) return;
+            openAppointmentFormModalForDoctor(scheduleBtn.dataset.doctor);
+        });
+    }
 
     // Next Patient button - automate queue flow
     elements.nextPatientBtn.addEventListener('click', handleNextPatient);
@@ -6995,10 +7149,17 @@ function setupEventListeners() {
         }
     });
 
-    // Appointment table sorting
-    document.querySelectorAll('#appointmentTable th[data-sort], #otherAppointmentTable th[data-sort]').forEach(th => {
-        th.addEventListener('click', () => sortAppointments(th.dataset.sort));
-    });
+    // Appointment table sorting (delegated since tables are generated dynamically)
+    const appointmentTablesContainerEl = elements.appointmentTablesContainer;
+    if (appointmentTablesContainerEl) {
+        appointmentTablesContainerEl.addEventListener('click', (e) => {
+            if (e.target.closest('table') === null) return;
+            const th = e.target.closest('th[data-sort]');
+            if (th) {
+                sortAppointments(th.dataset.sort);
+            }
+        });
+    }
 
     // Close appointment modal on backdrop click
     elements.appointmentFormModal.addEventListener('click', (e) => {

@@ -2553,7 +2553,7 @@ tbody tr.current-patient td {
         -webkit-overflow-scrolling: touch;
     }
 
-    #appointmentTable, #otherAppointmentTable {
+    #appointmentTablesContainer table {
         min-width: 1000px;
     }
 
@@ -2584,8 +2584,7 @@ tbody tr.current-patient td {
     }
 
     /* Current patient highlight */
-    #appointmentTable tbody tr.current-patient,
-    #otherAppointmentTable tbody tr.current-patient {
+    #appointmentTablesContainer tbody tr.current-patient {
         border-color: #22c55e;
         background-color: rgba(34, 197, 94, 0.05);
     }

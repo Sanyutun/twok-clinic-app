@@ -1343,12 +1343,19 @@ class DataLayer {
         }
 
         try {
-            // 1. Try to flush pending queue first (PUSH)
+            // 1. Try to flush pending queue first (PUSH).
+            // FIX: A stuck queue (e.g. an operation that keeps failing on a FK
+            // violation) must never block the pull, otherwise the full refetch below
+            // never runs and lost records are never restored.
             const syncManager = window.twokSyncManager || window.SyncManager;
             if (syncManager && syncManager.getQueueLength() > 0) {
-                TWOK_LOGGER.sync(`[DataLayer] Pushing ${syncManager.getQueueLength()} pending operations...`);
-                await syncManager.flushQueue();
-                TWOK_LOGGER.sync('[DataLayer] Pending operations pushed successfully');
+                try {
+                    TWOK_LOGGER.sync(`[DataLayer] Pushing ${syncManager.getQueueLength()} pending operations...`);
+                    await syncManager.flushQueue();
+                    TWOK_LOGGER.sync('[DataLayer] Pending operations pushed successfully');
+                } catch (pushError) {
+                    console.warn('[DataLayer] Queue flush failed, continuing with pull:', pushError.message);
+                }
             }
 
             // 2. Fetch recent changes (PULL)
@@ -1360,35 +1367,94 @@ class DataLayer {
             for (const table of tables) {
                 if (!silent) TWOK_LOGGER.sync(`[DataLayer] Syncing ${table}...`);
 
-                // A. Get all IDs from Supabase
-                const { data: allSupabaseRecords, error: fetchError } = await window.SupabaseClient.client
-                    .from(table)
-                    .select('id')
-                    .limit(5000);
+                // FIX: A failure in one table (network blip, RLS, malformed row) must not
+                // abort the rest of the pull — a single bad table used to silently prevent
+                // every other table (incl. expenses/appointments) from being restored.
+                try {
+                    await this._pullTable(table, silent);
+                } catch (tableError) {
+                    console.error(`[DataLayer] ⚠️ Sync failed for table ${table}:`, tableError);
+                }
+            }
 
-                if (fetchError) throw fetchError;
-                
-                const supabaseIds = new Set(allSupabaseRecords.map(r => r.id));
+    /**
+     * Pull/merge a single table from Supabase into local IndexedDB.
+     * Isolated in its own method so a failure in one table never aborts the
+     * rest of the pull.
+     */
+    async _pullTable(table, silent) {
+        const syncManager = window.twokSyncManager || window.SyncManager;
+
+        // A. Get ALL IDs from Supabase (paginated).
+        // FIX: The old single `.limit(5000)` query returned an arbitrary 5000-row
+                // subset (no ORDER BY). Once a table grew past ~5000 rows, local records
+                // whose IDs fell outside that subset were wrongly classified as "orphans"
+                // and deleted from IndexedDB only, even though they still existed in
+                // Supabase. Paginating with a deterministic ORDER BY guarantees we see
+                // every row before deciding anything is missing locally.
+                const supabaseIds = new Set();
+                const allSupabaseRecords = [];
+                const ID_PAGE_SIZE = 5000;
+                let idPage = 0;
+                while (true) {
+                    const { data: idBatch, error: fetchError } = await window.SupabaseClient.client
+                        .from(table)
+                        .select('id')
+                        .order('id')
+                        .range(idPage * ID_PAGE_SIZE, (idPage + 1) * ID_PAGE_SIZE - 1);
+
+                    if (fetchError) throw fetchError;
+                    if (!idBatch || idBatch.length === 0) break;
+
+                    idBatch.forEach(r => supabaseIds.add(r.id));
+                    allSupabaseRecords.push(...idBatch);
+
+                    if (idBatch.length < ID_PAGE_SIZE) break;
+                    idPage++;
+                }
 
                 // B. Get all IDs from local IndexedDB
                 const localRecords = await this.getAll(table);
                 
-                // C. Delete records that are NOT in Supabase AND NOT pending sync
+                // C. Delete records that are NOT in Supabase AND NOT pending sync.
+                // Records are only removed after a direct per-id confirmation that they
+                // are truly gone from Supabase. This closes the last window where the id
+                // snapshot could be stale (e.g. a record synced by another tab/device a
+                // moment after the snapshot was taken) and wrongly delete data locally
+                // even though it still exists in Supabase.
                 let deleteCount = 0;
                 for (const localRecord of localRecords) {
                     const isPending = syncManager && syncManager.isPending(table, localRecord.id);
-                    
-                    if (!supabaseIds.has(localRecord.id) && !isPending) {
-                        if (allSupabaseRecords.length === 0 && localRecords.length > 5 && 
-                            !['expense_categories', 'addresses', 'specialities', 'hospitals'].includes(table)) {
-                            console.warn(`[DataLayer] Suspicous: Supabase returned 0 records for ${table} but we have ${localRecords.length} locally. Skipping orphan deletion for safety.`);
-                            break;
-                        }
 
-                        TWOK_LOGGER.sync(`[DataLayer] Deleting orphan record from ${table}: ${localRecord.id}`);
-                        await this.delete(table, localRecord.id);
-                        deleteCount++;
+                    if (supabaseIds.has(localRecord.id) || isPending) continue;
+
+                    // Safety: never sweep when Supabase reported zero rows (e.g. RLS/auth blip)
+                    if (allSupabaseRecords.length === 0 && localRecords.length > 5 && 
+                        !['expense_categories', 'addresses', 'specialities', 'hospitals'].includes(table)) {
+                        console.warn(`[DataLayer] Suspicous: Supabase returned 0 records for ${table} but we have ${localRecords.length} locally. Skipping orphan deletion for safety.`);
+                        break;
                     }
+
+                    const { data: confirmRecord, error: confirmError } = await window.SupabaseClient.client
+                        .from(table)
+                        .select('id')
+                        .eq('id', localRecord.id)
+                        .maybeSingle();
+
+                    if (confirmError) {
+                        // Never delete on a verification failure — keep the local copy.
+                        console.warn(`[DataLayer] ⚠️ Could not verify ${table}:${localRecord.id} against Supabase, keeping local copy:`, confirmError.message);
+                        continue;
+                    }
+
+                    if (confirmRecord) {
+                        TWOK_LOGGER.sync(`[DataLayer] ✅ ${table}:${localRecord.id} still exists in Supabase — skipping local deletion`);
+                        continue;
+                    }
+
+                    TWOK_LOGGER.sync(`[DataLayer] Deleting orphan record from ${table}: ${localRecord.id}`);
+                    await this.delete(table, localRecord.id);
+                    deleteCount++;
                 }
                 
                 if (deleteCount > 0 && !silent) {
@@ -1407,16 +1473,38 @@ class DataLayer {
                     lastSync = date.toISOString();
                 }
 
-                const queryOptions = lastSync ? {
-                    updated_at: { operator: 'gt', value: lastSync }
-                } : {};
+                // FIX: Fetch recent records in pages instead of relying on the single
+                // `.limit(5000)` inside SupabaseClient.query(). If more than 5000 rows were
+                // updated since the last pull, the truncated remainder was silently skipped
+                // and the advanced `last_sync_timestamp` meant they were never fetched again.
+                // We paginate with a deterministic ORDER BY id (safe on every table, including
+                // lookup tables that have no updated_at column).
+                const recentData = [];
+                const RECENT_PAGE_SIZE = 5000;
+                let recentPage = 0;
+                while (true) {
+                    let recentQuery = window.SupabaseClient.client
+                        .from(table)
+                        .select('*')
+                        .order('id', { ascending: true })
+                        .range(recentPage * RECENT_PAGE_SIZE, (recentPage + 1) * RECENT_PAGE_SIZE - 1);
 
-                const recentData = await window.SupabaseClient.query(table, queryOptions);
+                    if (lastSync) {
+                        recentQuery = recentQuery.gt('updated_at', lastSync);
+                    }
+
+                    const { data: pageData, error: pageError } = await recentQuery;
+                    if (pageError) throw pageError;
+                    if (!pageData || pageData.length === 0) break;
+
+                    recentData.push(...pageData);
+                    if (pageData.length < RECENT_PAGE_SIZE) break;
+                    recentPage++;
+                }
 
                 if (recentData && recentData.length > 0) {
                     if (!silent) TWOK_LOGGER.sync(`[DataLayer] Found ${recentData.length} new/updated records for ${table}`);
                     
-                    const syncManager = window.twokSyncManager || window.SyncManager;
                     const localData = recentData
                         .map(record => this.mapFromDb(table, record))
                         .filter(record => {
@@ -1434,7 +1522,7 @@ class DataLayer {
                 
                 // Update sync timestamp ONLY after successful fetch
                 localStorage.setItem(`last_sync_timestamp_${table}`, new Date().toISOString());
-            }
+    }
 
             // 3. REFRESH MEMORY ARRAYS (Very important to avoid page reload)
             await this.loadAllLocalData();

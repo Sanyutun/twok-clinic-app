@@ -243,6 +243,26 @@
                 // Load settings into memory
                 await window.DataLayer.loadSettings();
 
+                // FIX: One-time self-heal. The old orphan-sweep bug deleted records from
+                // IndexedDB (while they still existed in Supabase) because its id fetch
+                // was truncated at 5000 rows — today's newest expenses/appointments were
+                // the most likely victims. The incremental pull (`updated_at > lastSync`)
+                // can never bring those back, so clear the pull markers once: the next
+                // sync becomes a FULL refetch and every record still in Supabase is
+                // restored locally.
+                try {
+                    const SELF_HEAL_KEY = 'twok_sync_pull_markers_reset_v2';
+                    if (localStorage.getItem(SELF_HEAL_KEY) === null) {
+                        localStorage.setItem(SELF_HEAL_KEY, '1');
+                        Object.keys(localStorage)
+                            .filter(k => k.startsWith('last_sync_timestamp_'))
+                            .forEach(k => localStorage.removeItem(k));
+                        TWOK_LOGGER.sync('[Sync Integration] 🔧 Self-heal: cleared pull markers — next sync will be a full refetch');
+                    }
+                } catch (e) {
+                    console.warn('[Sync Integration] Self-heal marker reset failed:', e);
+                }
+
                 // Migrate localStorage settings to Cloud Sync if needed
                 await (async function migrateSettingsToCloud() {
                     const migrations = [
