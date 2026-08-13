@@ -1343,6 +1343,21 @@ class DataLayer {
         }
 
         try {
+            // 0. Manual (non-silent) sync = FULL refetch.
+            // FIX: The incremental pull (`updated_at > last_sync_timestamp_{table}`)
+            // can never restore records that are missing locally but already exist in
+            // Supabase (e.g. after IndexedDB was wiped by the old orphan-sweep bug).
+            // Clearing the markers forces every table to be fully refetched from
+            // Supabase, guaranteeing lost appointments/instructions/labs/expenses that
+            // still exist in the cloud are brought back. Background/silent pulls stay
+            // incremental for speed.
+            if (!silent) {
+                Object.keys(localStorage)
+                    .filter(k => k.startsWith('last_sync_timestamp_'))
+                    .forEach(k => localStorage.removeItem(k));
+                TWOK_LOGGER.sync('[DataLayer] Manual sync: cleared pull markers — full refetch of all tables');
+            }
+
             // 1. Try to flush pending queue first (PUSH).
             // FIX: A stuck queue (e.g. an operation that keeps failing on a FK
             // violation) must never block the pull, otherwise the full refetch below
@@ -1377,6 +1392,21 @@ class DataLayer {
                 }
             }
 
+            // 3. REFRESH MEMORY ARRAYS (Very important to avoid page reload)
+            await this.loadAllLocalData();
+
+            if (!silent && window.showNotification) window.showNotification('Sync complete!', 'success');
+            
+            // 4. Trigger global sync complete event (UI components listen for this)
+            window.dispatchEvent(new CustomEvent('twok_sync_complete'));
+
+        } catch (error) {
+            console.error('[DataLayer] Sync failed:', error);
+            if (!silent && window.showNotification) window.showNotification('Sync error: ' + error.message, 'error');
+            throw error;
+        }
+    }
+
     /**
      * Pull/merge a single table from Supabase into local IndexedDB.
      * Isolated in its own method so a failure in one table never aborts the
@@ -1394,7 +1424,10 @@ class DataLayer {
                 // every row before deciding anything is missing locally.
                 const supabaseIds = new Set();
                 const allSupabaseRecords = [];
-                const ID_PAGE_SIZE = 5000;
+                // FIX: Supabase caps each REST response at 1000 rows (db-max-rows).
+                // Pages larger than 1000 silently truncate, so the pagination loop
+                // breaks after the first page and the newest records never sync.
+                const ID_PAGE_SIZE = 1000;
                 let idPage = 0;
                 while (true) {
                     const { data: idBatch, error: fetchError } = await window.SupabaseClient.client
@@ -1465,6 +1498,17 @@ class DataLayer {
                 const forceFullSync = ['addresses', 'specialities', 'hospitals', 'expense_categories'].includes(table);
                 // Get the last sync timestamp for THIS table
                 let lastSync = forceFullSync ? null : localStorage.getItem(`last_sync_timestamp_${table}`);
+
+                // FIX: Self-heal. If the cloud clearly holds MORE records for this table
+                // than we have locally, records were lost from IndexedDB (e.g. old
+                // orphan-sweep bug). The incremental marker alone would then never
+                // restore them, so force a FULL refetch of this table.
+                const localPendingCount = localRecords.filter(r => syncManager && syncManager.isPending(table, r.id)).length;
+                const cloudHasMore = supabaseIds.size > (localRecords.length - localPendingCount);
+                if (cloudHasMore) {
+                    if (!silent) TWOK_LOGGER.sync(`[DataLayer] Self-heal: cloud has more ${table} (${supabaseIds.size}) than local (${localRecords.length - localPendingCount}) — forcing full refetch`);
+                    lastSync = null;
+                }
                 
                 // If we have a timestamp, subtract 10 seconds for safety/buffer
                 if (lastSync) {
@@ -1480,7 +1524,10 @@ class DataLayer {
                 // We paginate with a deterministic ORDER BY id (safe on every table, including
                 // lookup tables that have no updated_at column).
                 const recentData = [];
-                const RECENT_PAGE_SIZE = 5000;
+                // FIX: Supabase caps each REST response at 1000 rows (db-max-rows).
+                // Pages larger than 1000 silently truncate; keep pages at exactly
+                // 1000 so pagination advances correctly and no records are skipped.
+                const RECENT_PAGE_SIZE = 1000;
                 let recentPage = 0;
                 while (true) {
                     let recentQuery = window.SupabaseClient.client
@@ -1522,21 +1569,6 @@ class DataLayer {
                 
                 // Update sync timestamp ONLY after successful fetch
                 localStorage.setItem(`last_sync_timestamp_${table}`, new Date().toISOString());
-    }
-
-            // 3. REFRESH MEMORY ARRAYS (Very important to avoid page reload)
-            await this.loadAllLocalData();
-
-            if (!silent && window.showNotification) window.showNotification('Sync complete!', 'success');
-            
-            // 4. Trigger global sync complete event (UI components listen for this)
-            window.dispatchEvent(new CustomEvent('twok_sync_complete'));
-
-        } catch (error) {
-            console.error('[DataLayer] Sync failed:', error);
-            if (!silent && window.showNotification) window.showNotification('Sync error: ' + error.message, 'error');
-            throw error;
-        }
     }
 }
 
