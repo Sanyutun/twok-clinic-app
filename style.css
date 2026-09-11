@@ -729,6 +729,15 @@ textarea.form-control {
     background-color: #e5e7eb;
 }
 
+.btn-lab {
+    background-color: #ede9fe;
+    color: #6d28d9;
+}
+
+.btn-lab:hover {
+    background-color: #ddd6fe;
+}
+
 .btn-danger {
     background-color: var(--danger-color);
     color: white;

@@ -3,7 +3,7 @@
  * Provides offline functionality, caching, and background sync
  */
 
-const CACHE_NAME = 'twok-clinic-cache-v4';
+const CACHE_NAME = 'twok-clinic-cache-v6';
 const API_CACHE_NAME = 'twok-clinic-api-cache-v1';
 
 // Static assets to cache
@@ -17,7 +17,12 @@ const STATIC_ASSETS = [
     './tv-view.html',
     './views/pharmacist-corner.html',
     './components/instruction-form.js',
-    './components/expense-form.js'
+    './components/expense-form.js',
+    './js/config/sync-config.js',
+    './js/sync/SupabaseClient.js',
+    './js/sync/DataLayer.js',
+    './js/sync/init-sync.js',
+    './js/sync/SyncManager.js'
 ];
 
 // API endpoints that should be cached

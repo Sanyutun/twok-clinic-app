@@ -211,7 +211,6 @@ The Pharmacist Corner works fully offline:
 ```javascript
 {
   lab_id: "lab_1234567890_lab456",
-  appointment_id: "appt_123",
   patient_id: "patient_456",
   patient_name: "Mg Mg",
   doctor_name: "Dr. Soe Chan Myae",

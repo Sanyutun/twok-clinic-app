@@ -56,7 +56,7 @@ class DataLayer {
                 'createdAt', 'createdTime', 'updatedAt', 'timestamp'
             ],
             'lab_records': [
-               'id', 'labId', 'appointmentId', 'appointment_id', 'expenseId', 'expense_id', 'patientId', 'patientName', 'doctorId', 'doctorName',
+               'id', 'labId', 'expenseId', 'expense_id', 'patientId', 'patientName', 'doctorId', 'doctorName',
                'labName', 'amount', 'status', 'dateTime', 'pendingTests',
                'timeline', 'createdTime', 'createdAt', 'updatedAt', 'LabID'
             ],
@@ -1258,11 +1258,22 @@ class DataLayer {
     async setupRealtimeSubscriptions() {
         if (!window.SupabaseClient || !window.SupabaseClient.initialized) {
             console.warn('[DataLayer] SupabaseClient not initialized, skipping realtime setup');
+            this.ensurePollingFallback();
             return;
         }
 
         if (!navigator.onLine) {
             TWOK_LOGGER.sync('[DataLayer] 📴 Offline: skipping realtime setup');
+            return;
+        }
+
+        // Respect the realtime feature flag. If realtime is disabled in config,
+        // fall back to polling-based sync instead.
+        const config = window.TWOK_CONFIG || {};
+        if (config.FEATURES && config.FEATURES.REALTIME_UPDATES === false
+            || config.SYNC && config.SYNC.REALTIME === false) {
+            TWOK_LOGGER.sync('[DataLayer] ⏱️ Realtime disabled in config, using polling sync');
+            this.ensurePollingFallback();
             return;
         }
 
@@ -1287,15 +1298,78 @@ class DataLayer {
         ];
 
         this.subscriptionsActive = true;
+        this._realtimeBroken = false;
+
+        // If Supabase Realtime fails to connect (WebSocket error in console), the
+        // app must not silently lose live updates — re-enable polling so data
+        // still refreshes on the periodic interval.
+        const onRealtimeBroken = (table, status) => {
+            if (this._realtimeBroken) return;
+            this._realtimeBroken = true;
+            TWOK_LOGGER.warn(`[DataLayer] 🔌 Supabase Realtime is unavailable (${table}: ${status}). Falling back to polling sync.`);
+            this.ensurePollingFallback();
+        };
 
         for (const table of tables) {
             TWOK_LOGGER.sync(`[DataLayer] Subscribing to realtime changes for ${table}...`);
             
-            await window.SupabaseClient.subscribe(table, async (eventType, record) => {
-                // Map event type names if necessary
-                const mappedEvent = eventType === 'insert' ? 'insert' : (eventType === 'update' ? 'update' : (eventType === 'delete' ? 'delete' : eventType));
-                await this.handleExternalChange(table, mappedEvent, record);
-            });
+            try {
+                await window.SupabaseClient.subscribe(table, async (eventType, record) => {
+                    // Map event type names if necessary
+                    const mappedEvent = eventType === 'insert' ? 'insert' : (eventType === 'update' ? 'update' : (eventType === 'delete' ? 'delete' : eventType));
+                    await this.handleExternalChange(table, mappedEvent, record);
+                }, { onRealtimeBroken });
+            } catch (e) {
+                // Subscribe can throw when the underlying WebSocket fails.
+                // Mark realtime as broken so we fall back to polling.
+                TWOK_LOGGER.warn(`[DataLayer] Real-time subscription failed for ${table}:`, e);
+                onRealtimeBroken(table, 'ERROR');
+            }
+        }
+
+        // If all subscriptions went through cleanly and realtime is healthy,
+        // stop any polling fallback that may have been started earlier.
+        if (!this._realtimeBroken) {
+            this.stopPollingFallback();
+        }
+    }
+
+    /**
+     * Stop the polling fallback timer (used when realtime is healthy again).
+     */
+    stopPollingFallback() {
+        if (this._pollTimer) {
+            clearInterval(this._pollTimer);
+            this._pollTimer = null;
+        }
+        this._pollingEnabled = false;
+        TWOK_LOGGER.sync('[DataLayer] ⏹️ Polling fallback stopped (realtime healthy)');
+    }
+
+    /**
+     * Ensure periodic polling sync is active (fallback when realtime is unavailable).
+     */
+    ensurePollingFallback() {
+        const manager = window.twokSyncManager || window.SyncManager;
+        if (!manager) return;
+
+        if (!this._pollingEnabled) {
+            this._pollingEnabled = true;
+            TWOK_LOGGER.sync('[DataLayer] ⏱️ Enabling polling sync fallback (realtime unavailable)');
+
+            // SyncManager.startPeriodicSync is disabled by design (it only logs).
+            // Use a lightweight interval here that pulls changed tables instead.
+            const doPull = () => {
+                if (!navigator.onLine || !manager.isOnline) return;
+                manager.pullAll && manager.pullAll(false).catch(err => {
+                    TWOK_LOGGER.sync('[DataLayer] Polling pull failed:', err?.message || err);
+                });
+            };
+
+            // Start with a short first poll, then settle into the configured interval.
+            setTimeout(doPull, 2000);
+            this._pollTimer = setInterval(doPull, (window.TWOK_CONFIG?.SYNC?.INTERVAL) || 120000);
+            TWOK_LOGGER.sync(`[DataLayer] ⏱️ Polling every ${(window.TWOK_CONFIG?.SYNC?.INTERVAL) || 120000}ms via fallback`);
         }
     }
 

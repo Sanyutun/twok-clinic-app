@@ -349,23 +349,49 @@ class SupabaseClient {
             );
         });
 
-        const subscription = await channel.subscribe((status, err) => {
-            if (status === 'SUBSCRIBED') {
-                TWOK_LOGGER.realtime(`[SupabaseClient] ✅ Subscribed to ${table}`);
-            } else if (status === 'CHANNEL_ERROR') {
-                // Only log if still online to reduce noise
-                if (navigator.onLine) {
-                   // const errMsg = err ?? 'No error details provided (check Realtime is enabled for this table in Supabase dashboard, and that RLS policies allow SELECT)';
-                   // console.error(`[SupabaseClient] ❌ Channel error for ${table}:`, errMsg);
+        // Track whether this channel (and the shared realtime WebSocket) actually
+        // reaches SUBSCRIBED. A CHANNEL_ERROR / TIMED_OUT here usually means the
+        // Supabase project has Realtime disabled or RLS blocks the anon role — the
+        // WebSocket handshake fails with no useful detail in the console. We surface
+        // that clearly so the app can fall back to polling instead of silently
+        // depending on a dead realtime connection.
+        let connected = false;
+        let notified = false;
+        const onRealtimeBroken = options.onRealtimeBroken || (() => {});
+        const notifyBroken = (status) => {
+            if (connected || notified) return;
+            notified = true;
+            TWOK_LOGGER.warn(`[SupabaseClient] 🔌 Realtime not active for ${table} (status: ${status || 'unknown'}). A polling fallback may be needed.`);
+            onRealtimeBroken(table, status);
+        };
+
+        try {
+            await channel.subscribe((status, err) => {
+                if (status === 'SUBSCRIBED') {
+                    connected = true;
+                    TWOK_LOGGER.realtime(`[SupabaseClient] ✅ Subscribed to ${table}`);
+                } else if (status === 'CHANNEL_ERROR') {
+                    if (navigator.onLine) {
+                        const errMsg = err?.message || 'No error details provided (check Realtime is enabled for the table in the Supabase dashboard, and that RLS policies allow SELECT for the anon role)';
+                        TWOK_LOGGER.warn(`[SupabaseClient] ❌ Channel error for ${table}: ${errMsg}`);
+                        notifyBroken('CHANNEL_ERROR');
+                    }
+                } else if (status === 'TIMED_OUT') {
+                    if (navigator.onLine) {
+                        TWOK_LOGGER.warn(`[SupabaseClient] ⚠️ Subscription timed out for ${table}`);
+                        notifyBroken('TIMED_OUT');
+                    }
+                } else {
+                    TWOK_LOGGER.realtime(`[SupabaseClient] Subscription status for ${table}:`, status);
                 }
-            } else if (status === 'TIMED_OUT') {
-                if (navigator.onLine) {
-                    console.warn(`[SupabaseClient] ⚠️ Subscription timed out for ${table}`);
-                }
-            } else {
-                TWOK_LOGGER.realtime(`[SupabaseClient] Subscription status for ${table}:`, status);
-            }
-        });
+            });
+        } catch (err) {
+            // The shared WebSocket itself failed to open (e.g. Realtime not
+            // enabled on the project, network blocks wss://). Don't let this
+            // break app init — signal the polling fallback instead.
+            TWOK_LOGGER.warn(`[SupabaseClient] ⚠️ Real-time connection failed for ${table}: ${err?.message || err}`);
+            notifyBroken('CLOSED');
+        }
 
         this.subscriptions.set(channelName, { channel, table, callback });
         return channelName;

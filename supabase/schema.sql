@@ -122,7 +122,6 @@ CREATE TABLE IF NOT EXISTS expenses (
 
 CREATE TABLE IF NOT EXISTS lab_records (
     id VARCHAR(100) PRIMARY KEY,
-    appointment_id VARCHAR(50) REFERENCES appointments(id) ON DELETE CASCADE,
     expense_id VARCHAR(100) REFERENCES expenses(id) ON DELETE CASCADE,
     patient_id VARCHAR(50) REFERENCES patients(id) ON DELETE CASCADE,
     patient_name VARCHAR(255),
@@ -158,8 +157,8 @@ ALTER TABLE appointments ADD COLUMN IF NOT EXISTS age INTEGER;
 ALTER TABLE appointments ADD COLUMN IF NOT EXISTS arrival_time TIMESTAMP WITH TIME ZONE;
 ALTER TABLE appointments ADD COLUMN IF NOT EXISTS edited_time TIMESTAMP WITH TIME ZONE;
 
-ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS appointment_id VARCHAR(50) REFERENCES appointments(id) ON DELETE CASCADE;
 ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS expense_id VARCHAR(100) REFERENCES expenses(id) ON DELETE CASCADE;
+ALTER TABLE lab_records DROP COLUMN IF EXISTS appointment_id;
 
 -- ==========================================
 -- 3. RLS AND REPLICATION

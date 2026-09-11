@@ -1975,61 +1975,154 @@ function showPatientBarcode(patientId) {
     }, 50);
 }
 
+// ==================== BT THERMAL PRINTER HELPERS ====================
+
+const BT_PRINTER_UUIDS = [
+    '000018f0-0000-1000-8000-00805f9b34fb',
+    '0000ff00-0000-1000-8000-00805f9b34fb',
+    '0000a002-0000-1000-8000-00805f9b34fb',
+    '0000a003-0000-1000-8000-00805f9b34fb',
+    '0000ae30-0000-1000-8000-00805f9b34fb',
+    '0000fee0-0000-1000-8000-00805f9b34fb',
+    '0000fee7-0000-1000-8000-00805f9b34fb',
+];
+
+let btPrinterCharacteristic = null;
+let btPrinterDeviceId = null;
+
+/**
+ * Connect (or reuse) the Bluetooth thermal printer and return a writable characteristic.
+ */
+async function connectToBluetoothPrinter() {
+    if (!navigator.bluetooth) {
+        showNotification('Bluetooth not supported in this browser', 'warning');
+        throw new Error('Bluetooth not supported in this browser');
+    }
+
+    if (btPrinterCharacteristic && btPrinterDeviceId === localStorage.getItem('btPrinterId')) {
+        return btPrinterCharacteristic;
+    }
+
+    const savedId = localStorage.getItem('btPrinterId');
+    let device = null;
+    if (savedId && navigator.bluetooth.getDevices) {
+        const devices = await navigator.bluetooth.getDevices();
+        device = devices.find(d => d.id === savedId) || null;
+    }
+    if (!device) {
+        device = await navigator.bluetooth.requestDevice({
+            acceptAllDevices: true,
+            optionalServices: BT_PRINTER_UUIDS
+        });
+        try { localStorage.setItem('btPrinterId', device.id); } catch (e) {}
+    }
+
+    const server = await device.gatt.connect();
+    const services = await server.getPrimaryServices();
+    let characteristic = null;
+    for (const service of services) {
+        try {
+            const chars = await service.getCharacteristics();
+            for (const c of chars) {
+                if (c.properties.write || c.properties.writeWithoutResponse) {
+                    characteristic = c;
+                    break;
+                }
+            }
+        } catch (e) { /* skip */ }
+        if (characteristic) break;
+    }
+    if (!characteristic) {
+        showNotification('Could not find writable characteristic on this printer. Check console (F12) for service details.', 'warning');
+        throw new Error('No writable characteristic on printer');
+    }
+
+    btPrinterCharacteristic = characteristic;
+    btPrinterDeviceId = device.id;
+    try {
+        if (server.connected) {
+            server.addEventListener('gattserverdisconnected', () => {
+                btPrinterCharacteristic = null;
+                btPrinterDeviceId = null;
+            });
+        }
+    } catch (e) { /* optional cleanup */ }
+    return characteristic;
+}
+
+/**
+ * Send a 1-bit raster bitmap to the thermal printer using ESC/POS GS v 0.
+ */
+async function sendRasterToBluetooth(characteristic, printerW, printerH, imageBytes) {
+    const chunkSize = 100;
+    const bytesPerRow = Math.ceil(printerW / 8);
+    const header = new Uint8Array([0x1D, 0x76, 0x30, 0,
+        bytesPerRow & 0xFF, (bytesPerRow >> 8) & 0xFF,
+        printerH & 0xFF, (printerH >> 8) & 0xFF]);
+    const gapFeed = new Uint8Array([0x1D, 0x0C]);
+    await characteristic.writeValue(gapFeed);
+    await characteristic.writeValue(gapFeed);
+    await characteristic.writeValue(gapFeed);
+    await characteristic.writeValue(header);
+    for (let i = 0; i < imageBytes.length; i += chunkSize) {
+        await characteristic.writeValue(imageBytes.subarray(i, i + chunkSize));
+    }
+    await characteristic.writeValue(gapFeed);
+}
+
+/**
+ * Build a 1-bit monochrome bit array from a high-res canvas for the printer.
+ */
+function buildRasterBytes(sourceCanvas, printerW, printerH) {
+    const printerCanvas = document.createElement('canvas');
+    printerCanvas.width = printerW;
+    printerCanvas.height = printerH;
+    const printerCtx = printerCanvas.getContext('2d');
+    printerCtx.imageSmoothingEnabled = true;
+    printerCtx.imageSmoothingQuality = 'high';
+    printerCtx.drawImage(sourceCanvas, 0, 0, printerW, printerH);
+    const imageData = printerCtx.getImageData(0, 0, printerW, printerH);
+    const pixels = imageData.data;
+    const bytesPerRow = Math.ceil(printerW / 8);
+    const imageBytes = new Uint8Array(bytesPerRow * printerH);
+    for (let y = 0; y < printerH; y++) {
+        for (let x = 0; x < printerW; x++) {
+            const idx = (y * printerW + x) * 4;
+            const gray = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
+            if (gray < 128) {
+                const byteIdx = y * bytesPerRow + (x >> 3);
+                const bitIdx = 7 - (x & 7);
+                imageBytes[byteIdx] |= (1 << bitIdx);
+            }
+        }
+    }
+    return imageBytes;
+}
+
+const MYANMAR_FONTS = "'Noto Sans Myanmar', 'Padauk', 'Myanmar Text', 'Masterpiece Uni Sans', 'Yunghkio', 'Myanmar Blocks', sans-serif";
+
+let myanmarFontLoadPromise = null;
+function ensureMyanmarFonts() {
+    if (myanmarFontLoadPromise) return myanmarFontLoadPromise;
+    if (!document.fonts || typeof document.fonts.load !== 'function') {
+        myanmarFontLoadPromise = Promise.resolve();
+        return myanmarFontLoadPromise;
+    }
+    myanmarFontLoadPromise = Promise.all([
+        document.fonts.load('16px "Noto Sans Myanmar"').catch(() => {}),
+        document.fonts.load('16px "Padauk"').catch(() => {}),
+        document.fonts.load('16px "Myanmar Text"').catch(() => {})
+    ]).then(() => {});
+    return myanmarFontLoadPromise;
+}
+
 async function printBarcodeBluetooth(patientId, patientName, patientAge, patientAddress, patientPhone) {
     if (!navigator.bluetooth) {
         showNotification('Bluetooth not supported in this browser', 'warning');
         return;
     }
     try {
-        const printerUuids = [
-            '000018f0-0000-1000-8000-00805f9b34fb',
-            '0000ff00-0000-1000-8000-00805f9b34fb',
-            '0000a002-0000-1000-8000-00805f9b34fb',
-            '0000a003-0000-1000-8000-00805f9b34fb',
-            '0000ae30-0000-1000-8000-00805f9b34fb',
-            '0000fee0-0000-1000-8000-00805f9b34fb',
-            '0000fee7-0000-1000-8000-00805f9b34fb',
-        ];
-        const savedId = localStorage.getItem('btPrinterId');
-        let device = null;
-        if (savedId && navigator.bluetooth.getDevices) {
-            const devices = await navigator.bluetooth.getDevices();
-            device = devices.find(d => d.id === savedId) || null;
-        }
-        if (!device) {
-            device = await navigator.bluetooth.requestDevice({
-                acceptAllDevices: true,
-                optionalServices: printerUuids
-            });
-            try { localStorage.setItem('btPrinterId', device.id); } catch (e) {}
-        }
-        console.log('BLE device:', device.name, device.id);
-        const server = await device.gatt.connect();
-        console.log('GATT connected');
-        const services = await server.getPrimaryServices();
-        console.log('Services found:', services.length);
-        let characteristic = null;
-        for (const service of services) {
-            console.log('Checking service:', service.uuid);
-            try {
-                const chars = await service.getCharacteristics();
-                for (const c of chars) {
-                    console.log('  Char:', c.uuid, 'props:', JSON.stringify(Object.keys(c.properties).filter(k => c.properties[k])));
-                    if (c.properties.write || c.properties.writeWithoutResponse) {
-                        characteristic = c;
-                        break;
-                    }
-                }
-            } catch (e) {
-                console.log('  Error getting chars:', e.message);
-            }
-            if (characteristic) break;
-        }
-        if (!characteristic) {
-            showNotification('Could not find writable characteristic on this printer. Check console (F12) for service details.', 'warning');
-            return;
-        }
-        console.log('Using characteristic:', characteristic.uuid);
+        const characteristic = await connectToBluetoothPrinter();
         const stickerMmW = 50;
         const stickerMmH = 30;
         const dpi = 203;
@@ -2089,41 +2182,8 @@ async function printBarcodeBluetooth(patientId, patientName, patientAge, patient
             const bx = pad;
             ctx.drawImage(barcodeCanvas, bx, y, availW, barcodeH);
         }
-        const printerCanvas = document.createElement('canvas');
-        printerCanvas.width = printerW;
-        printerCanvas.height = printerH;
-        const printerCtx = printerCanvas.getContext('2d');
-        printerCtx.imageSmoothingEnabled = true;
-        printerCtx.imageSmoothingQuality = 'high';
-        printerCtx.drawImage(canvas, 0, 0, printerW, printerH);
-        const imageData = printerCtx.getImageData(0, 0, printerW, printerH);
-        const pixels = imageData.data;
-        const bytesPerRow = Math.ceil(printerW / 8);
-        const imageBytes = new Uint8Array(bytesPerRow * printerH);
-        for (let y = 0; y < printerH; y++) {
-            for (let x = 0; x < printerW; x++) {
-                const idx = (y * printerW + x) * 4;
-                const gray = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
-                if (gray < 128) {
-                    const byteIdx = y * bytesPerRow + (x >> 3);
-                    const bitIdx = 7 - (x & 7);
-                    imageBytes[byteIdx] |= (1 << bitIdx);
-                }
-            }
-        }
-        const chunkSize = 100;
-        const header = new Uint8Array([0x1D, 0x76, 0x30, 0,
-            bytesPerRow & 0xFF, (bytesPerRow >> 8) & 0xFF,
-            printerH & 0xFF, (printerH >> 8) & 0xFF]);
-        const gapFeed = new Uint8Array([0x1D, 0x0C]);
-        await characteristic.writeValue(gapFeed);
-        await characteristic.writeValue(gapFeed);
-        await characteristic.writeValue(gapFeed);
-        await characteristic.writeValue(header);
-        for (let i = 0; i < imageBytes.length; i += chunkSize) {
-            await characteristic.writeValue(imageBytes.subarray(i, i + chunkSize));
-        }
-        await characteristic.writeValue(gapFeed);
+        const imageBytes = buildRasterBytes(canvas, printerW, printerH);
+        await sendRasterToBluetooth(characteristic, printerW, printerH, imageBytes);
         showNotification('Barcode sticker printed successfully');
     } catch (err) {
         console.error('Print error:', err);
@@ -3350,8 +3410,19 @@ function getDoctorAppointmentSection(doctorName) {
     const countEl = document.createElement('span');
     countEl.className = 'record-count';
 
+    const receiptBtn = document.createElement('button');
+    receiptBtn.type = 'button';
+    receiptBtn.className = 'btn btn-secondary btn-sm';
+    receiptBtn.title = 'Print POS fee receipt for done patients';
+    receiptBtn.textContent = '🧾 Receipt';
+    receiptBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openDoctorReceiptPrompt(doctorName);
+    });
+
     if (doctorName === TARGET_DOCTOR_NAME) headerActions.appendChild(undoBtn);
     headerActions.appendChild(countEl);
+    headerActions.appendChild(receiptBtn);
 
     header.appendChild(headerTitle);
     header.appendChild(headerActions);
@@ -3887,6 +3958,370 @@ function printAppointmentBarcode(event, appointmentId) {
     const address = patient ? patient.address : '';
     printBarcodeBluetooth(appt.patientId || '', appt.patientName || '', appt.age || '', address, appt.phone || '');
 }
+
+// ==================== POS DOCTOR FEE RECEIPT ====================
+
+const CLINIC_NAME = 'Taw Win Okkala Clinic';
+let posReceiptModal = null;
+let posReceiptDoctorName = null;
+let posReceiptPatients = [];
+
+function ensurePosReceiptModal() {
+    if (posReceiptModal) return posReceiptModal;
+
+    const modal = document.createElement('div');
+    modal.id = 'posReceiptModal';
+    modal.className = 'global-form-modal hidden';
+    modal.innerHTML = `
+        <div class="global-form-modal-backdrop"></div>
+        <div class="global-form-modal-content">
+            <div class="global-form-modal-header">
+                <h3>🧾 Doctor Fee Receipt</h3>
+                <button type="button" class="global-form-modal-close">&times;</button>
+            </div>
+            <div class="global-form-modal-body">
+                <div class="form-group">
+                    <label for="posReceiptDate">Appointment Date <span class="required">*</span></label>
+                    <input type="date" id="posReceiptDate" class="form-control">
+                </div>
+                <div class="pos-summary" id="posPatientSummary"></div>
+                <div class="form-group">
+                    <label for="posConsultationFee">Consultation Fee (per patient) <span class="required">*</span></label>
+                    <input type="number" id="posConsultationFee" class="form-control" min="0" step="1" placeholder="e.g. 5000" inputmode="numeric">
+                </div>
+
+                <div class="form-group">
+                    <label>Additional Charges / Discounts (amount can be negative)</label>
+                    <div id="posChargeRows"></div>
+                    <button type="button" class="btn btn-secondary btn-sm pos-add-charge">+ Add Charge</button>
+                </div>
+
+                <div class="pos-total">
+                    <span>No. of Patients</span><span id="posTotalPatients">0</span>
+                    <span>Total Consultation</span><span id="posTotalConsultation">0</span>
+                    <span>Total Adjustments</span><span id="posTotalAdjustments">0</span>
+                    <span class="pos-grand">Final Balance</span><span class="pos-grand" id="posFinalBalance">0</span>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="posCancelBtn">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="posPrintBtn">🖨️ Print Receipt</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    posReceiptModal = modal;
+
+    modal.querySelector('.global-form-modal-close').addEventListener('click', closePosReceiptModal);
+    modal.querySelector('.global-form-modal-backdrop').addEventListener('click', closePosReceiptModal);
+    modal.querySelector('#posCancelBtn').addEventListener('click', closePosReceiptModal);
+    modal.querySelector('.pos-add-charge').addEventListener('click', () => addPosChargeRow());
+    modal.querySelector('#posPrintBtn').addEventListener('click', onPosPrintReceipt);
+    modal.querySelector('#posConsultationFee').addEventListener('input', updatePosTotals);
+    modal.querySelector('#posReceiptDate').addEventListener('change', refreshPosPatientSummary);
+    modal.querySelector('#posConsultationFee').addEventListener('keydown', (e) => { if (e.key === 'Enter') onPosPrintReceipt(); });
+
+    if (!document.getElementById('pos-receipt-styles')) {
+        const style = document.createElement('style');
+        style.id = 'pos-receipt-styles';
+        style.textContent = `
+            .pos-summary { background:#f3f4f6; border-radius:8px; padding:8px 12px; margin-bottom:12px; max-height:160px; overflow:auto; font-size:0.9rem; }
+            .pos-summary-label { font-weight:600; color:var(--text-primary); margin-bottom:4px; }
+            .pos-summary-item { display:flex; justify-content:space-between; padding:2px 0; }
+            .pos-summary-count { color:var(--text-secondary); }
+            .pos-charge-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+            .pos-charge-row .form-control { margin:0; }
+            .pos-charge-row label { flex:1; font-size:0.85rem; color:var(--text-secondary); }
+            .pos-charge-remove { flex-shrink:0; }
+            .pos-total { border-top:1px solid #e5e7eb; margin-top:14px; padding-top:10px; font-size:0.95rem; }
+            .pos-total > span { display:flex; justify-content:space-between; padding:4px 0; color:var(--text-primary); }
+            .pos-total .pos-grand { font-weight:700; font-size:1.1rem; border-top:1px solid #e5e7eb; padding-top:8px; margin-top:4px; }
+        `;
+        document.head.appendChild(style);
+    }
+
+    return modal;
+}
+
+function closePosReceiptModal() {
+    if (posReceiptModal) posReceiptModal.classList.add('hidden');
+}
+
+function addPosChargeRow(label, amount) {
+    const container = document.getElementById('posChargeRows');
+    if (!container) return;
+    const row = document.createElement('div');
+    row.className = 'pos-charge-row';
+    row.innerHTML = `
+        <input type="text" class="form-control pos-charge-label" placeholder="Label (e.g. Discount, Lab, Medicine)" value="${escapeAttribute(label || '')}">
+        <input type="number" class="form-control pos-charge-amount" step="1" placeholder="Amount (+/-)" value="${amount != null ? amount : ''}" inputmode="numeric">
+        <button type="button" class="btn btn-secondary btn-sm pos-charge-remove" title="Remove">&times;</button>
+    `;
+    row.querySelector('.pos-charge-amount').addEventListener('input', updatePosTotals);
+    row.querySelector('.pos-charge-remove').addEventListener('click', () => {
+        row.remove();
+        updatePosTotals();
+    });
+    container.appendChild(row);
+    updatePosTotals();
+}
+
+function getPosCharges() {
+    const rows = document.querySelectorAll('#posChargeRows .pos-charge-row');
+    const charges = [];
+    rows.forEach(row => {
+        const label = row.querySelector('.pos-charge-label').value.trim();
+        const amount = parseFloat(row.querySelector('.pos-charge-amount').value);
+        if (label || !isNaN(amount)) {
+            charges.push({ label: label || 'Adjustment', amount: isNaN(amount) ? 0 : amount });
+        }
+    });
+    return charges;
+}
+
+function updatePosTotals() {
+    const patients = posReceiptPatients || [];
+    const fee = parseFloat(document.getElementById('posConsultationFee').value);
+    const consultFee = isNaN(fee) ? 0 : fee;
+    const totalConsultation = patients.length * consultFee;
+    const charges = getPosCharges();
+    const totalAdjustments = charges.reduce((sum, c) => sum + c.amount, 0);
+    const finalBalance = totalConsultation + totalAdjustments;
+
+    document.getElementById('posTotalPatients').textContent = patients.length;
+    document.getElementById('posTotalConsultation').textContent = totalConsultation.toLocaleString();
+    document.getElementById('posTotalAdjustments').textContent = (totalAdjustments >= 0 ? '+' : '') + totalAdjustments.toLocaleString();
+    document.getElementById('posFinalBalance').textContent = finalBalance.toLocaleString();
+}
+
+function apptDateStr(appt) {
+    const t = appt.appointmentTime || appt.appointment_time || appt.createdAt;
+    if (!t) return '';
+    try {
+        const d = new Date(t);
+        if (isNaN(d.getTime())) return '';
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    } catch (e) {
+        return '';
+    }
+}
+
+function donePatientsForDate(doctorName, dateStr) {
+    return (appointments || []).filter(a =>
+        a.doctorName === doctorName &&
+        a.status === 'Done' &&
+        (!dateStr || apptDateStr(a) === dateStr)
+    );
+}
+
+function refreshPosPatientSummary() {
+    if (!posReceiptModal) return;
+    const dateStr = document.getElementById('posReceiptDate').value;
+    const done = donePatientsForDate(posReceiptDoctorName, dateStr);
+    posReceiptPatients = done.slice();
+
+    const container = document.getElementById('posChargeRows');
+    if (container) {
+        container.innerHTML = '';
+        addPosChargeRow('', '');
+    }
+
+    const summary = document.getElementById('posPatientSummary');
+    if (done.length === 0) {
+        summary.innerHTML = `<div class="pos-summary-label">No done patients for ${escapeHtml(posReceiptDoctorName)} on ${dateStr || 'selected date'}.</div>`;
+    } else {
+        const rows = done.map(p =>
+            `<div class="pos-summary-item"><span>${escapeHtml(p.patientName)}</span><span class="pos-summary-count">${escapeHtml(p.appointmentTime ? new Date(p.appointmentTime).toLocaleDateString() : '')}</span></div>`
+        ).join('');
+        summary.innerHTML = `<div class="pos-summary-label">${escapeHtml(posReceiptDoctorName)} — ${done.length} done patient(s) on ${escapeHtml(dateStr || 'selected date')}</div>${rows}`;
+    }
+
+    updatePosTotals();
+}
+
+function openDoctorReceiptPrompt(doctorName) {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${y}-${m}-${day}`;
+
+    posReceiptDoctorName = doctorName;
+
+    ensurePosReceiptModal();
+    posReceiptModal.classList.remove('hidden');
+
+    document.getElementById('posReceiptDate').value = todayStr;
+    document.getElementById('posConsultationFee').value = '';
+
+    refreshPosPatientSummary();
+
+    const feeInput = document.getElementById('posConsultationFee');
+    setTimeout(() => feeInput.focus(), 50);
+}
+
+function onPosPrintReceipt() {
+    const fee = parseFloat(document.getElementById('posConsultationFee').value);
+    if (isNaN(fee) || fee <= 0) {
+        showNotification('Please enter a valid consultation fee', 'warning');
+        return;
+    }
+    const doctorName = posReceiptDoctorName;
+    const patients = posReceiptPatients || [];
+    const charges = getPosCharges();
+    const dateStr = document.getElementById('posReceiptDate').value;
+    printDoctorFeeReceipt(doctorName, patients, fee, charges, dateStr);
+}
+
+function drawReceiptRow(ctx, left, right, padX, availW, y, isBold) {
+    if (isBold) {
+        ctx.textAlign = 'left';
+        ctx.fillText(left, padX, y + 2);
+        ctx.textAlign = 'right';
+        ctx.fillText(right, padX + availW, y + 2);
+    }
+    ctx.textAlign = 'left';
+    ctx.fillText(left, padX, y);
+    ctx.textAlign = 'right';
+    ctx.fillText(right, padX + availW, y);
+}
+
+async function printDoctorFeeReceipt(doctorName, patients, consultFee, charges, dateStr) {
+    try {
+        await ensureMyanmarFonts();
+        const characteristic = await connectToBluetoothPrinter();
+
+        let receiptDate = new Date().toLocaleDateString('en-GB');
+        if (dateStr) {
+            try {
+                const d = new Date(dateStr + 'T00:00:00');
+                if (!isNaN(d.getTime())) receiptDate = d.toLocaleDateString('en-GB');
+            } catch (e) { /* keep current date */ }
+        }
+
+        const dpi = 203;
+        const dotsPerMm = dpi / 25.4;
+        const receiptMmW = 50;
+        const printerW = Math.round(receiptMmW * dotsPerMm);
+        const scale = 4;
+        const pad = 6 * scale;
+        const availW = printerW * scale - pad * 2;
+
+        const totalConsultation = patients.length * consultFee;
+        const totalAdjustments = charges.reduce((s, c) => s + c.amount, 0);
+        const finalBalance = totalConsultation + totalAdjustments;
+
+        const lineH = Math.round(4.2 * dotsPerMm * scale);
+        const sepH = Math.round(1 * dotsPerMm * scale);
+
+        // Layout on the high-res canvas
+        const layout = [];
+
+        layout.push({ type: 'h1', text: CLINIC_NAME });
+        layout.push({ type: 'h2', text: receiptDate + '  ' + (doctorName || '') });
+        layout.push({ type: 'sep' });
+        layout.push({ type: 'h2', text: 'RECEIPT' });
+        layout.push({ type: 'sep' });
+
+        for (const p of patients) {
+            layout.push({ type: 'row', left: p.patientName || '-', right: consultFee.toLocaleString() });
+        }
+        layout.push({ type: 'rowBold', left: 'Total Consultation', right: totalConsultation.toLocaleString() });
+
+        if (charges.length > 0) {
+            layout.push({ type: 'sep' });
+            for (const c of charges) {
+                const amtText = (c.amount >= 0 ? '+' : '') + c.amount.toLocaleString();
+                layout.push({ type: 'row', left: c.label || 'Adjustment', right: amtText });
+            }
+        }
+
+        layout.push({ type: 'sep' });
+        layout.push({ type: 'rowBold', left: 'FINAL BALANCE', right: finalBalance.toLocaleString() });
+        layout.push({ type: 'footer', text: 'Thank you!' });
+        layout.push({ type: 'footer', text: CLINIC_NAME });
+
+        let totalHeight = pad * 2;
+        const measCtx = document.createElement('canvas').getContext('2d');
+        for (const item of layout) {
+            if (item.type === 'sep') {
+                totalHeight += sepH;
+            } else if (item.type === 'h1') {
+                totalHeight += lineH * 2;
+            } else if (item.type === 'row' || item.type === 'rowBold') {
+                measCtx.font = `${item.type === 'rowBold' ? 'bold ' : ''}${Math.round(22 * scale)}px Arial, ${MYANMAR_FONTS}`;
+                const lines = wrapText(measCtx, item.left || '', availW - 100 * scale);
+                totalHeight += lineH * lines.length;
+            } else {
+                totalHeight += lineH;
+            }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = printerW * scale;
+        canvas.height = totalHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#000000';
+        ctx.textBaseline = 'top';
+
+        let cy = pad;
+        for (const item of layout) {
+            if (item.type === 'sep') {
+                cy += sepH;
+                continue;
+            }
+            if (item.type === 'h1') {
+                ctx.font = `bold ${Math.round(34 * scale)}px Arial, ${MYANMAR_FONTS}`;
+                ctx.textAlign = 'center';
+                ctx.fillText(item.text, canvas.width / 2, cy);
+                cy += lineH * 2;
+                continue;
+            }
+            if (item.type === 'h2') {
+                ctx.font = `${Math.round(24 * scale)}px Arial, ${MYANMAR_FONTS}`;
+                ctx.textAlign = 'center';
+                ctx.fillText(item.text, canvas.width / 2, cy);
+                cy += lineH;
+                continue;
+            }
+            if (item.type === 'row' || item.type === 'rowBold') {
+                ctx.font = `${item.type === 'rowBold' ? 'bold ' : ''}${Math.round(22 * scale)}px Arial, ${MYANMAR_FONTS}`;
+                const leftLines = wrapText(ctx, item.left, availW - 100 * scale);
+                const isBold = item.type === 'rowBold';
+                for (let i = 0; i < leftLines.length; i++) {
+                    drawReceiptRow(ctx, leftLines[i], i === leftLines.length - 1 ? item.right : '', pad, availW, cy, isBold);
+                    cy += lineH;
+                }
+                continue;
+            }
+            if (item.type === 'footer') {
+                ctx.font = `${Math.round(18 * scale)}px Arial, ${MYANMAR_FONTS}`;
+                ctx.textAlign = 'center';
+                ctx.fillText(item.text, canvas.width / 2, cy);
+                cy += lineH;
+                continue;
+            }
+        }
+
+        const printerH = Math.round(canvas.height / scale);
+        const imageBytes = buildRasterBytes(canvas, printerW, printerH);
+        await sendRasterToBluetooth(characteristic, printerW, printerH, imageBytes);
+
+        showNotification('Fee receipt printed successfully');
+    } catch (err) {
+        console.error('Receipt print error:', err);
+        if (err.message !== 'User cancelled') {
+            showNotification('Receipt print failed: ' + err.message, 'warning');
+        }
+    }
+}
+
 
 /**
  * Mark appointment as Booked (from Noted)
@@ -8778,21 +9213,13 @@ function getAppointmentExpenseCount(appointmentId) {
  * Get lab records for an appointment
  */
 function getAppointmentLabRecords(appointmentId) {
-    // 1. Direct link via appointment_id if present
-    let labs = labRecords.filter(lab => 
-        lab.appointment_id === appointmentId || 
-        lab.appointmentId === appointmentId
-    );
-    
-    if (labs.length > 0) return labs;
-
-    // 2. Link via expenses that are linked to this appointment
+    // 1. Link via expenses that are linked to this appointment
     const appointmentExpenses = expenses.filter(exp => 
         exp.appointment_id === appointmentId || exp.appointmentId === appointmentId
     );
     const expenseIds = appointmentExpenses.map(exp => exp.id);
     
-    // 3. Link via instruction that has linkedLabIds
+    // 2. Link via instruction that has linkedLabIds
     const instruction = instructions.find(inst => 
         inst.appointment_id === appointmentId || inst.appointmentId === appointmentId
     );
@@ -8974,6 +9401,9 @@ function renderPharmacistCorner(patientIdFilter) {
                     <button type="button" class="btn btn-secondary" onclick="openExpenseFromPharmacist('${apptId}')">
                         ${expenseCount > 0 ? `💰 Add Expense (${expenseCount})` : '💰 Expense'}
                     </button>
+                    <button type="button" class="btn btn-lab" onclick="addLabRecordFromPharmacist('${apptId}')">
+                        ${apptLabs.length > 0 ? `🔬 Add Lab (${apptLabs.length})` : '🔬 Add Lab Record'}
+                    </button>
                 </div>
             </div>
         `;
@@ -9090,6 +9520,102 @@ function openExpenseFromPharmacist(appointmentId) {
         // Fallback to legacy expense form
         openExpenseForm(appointmentId);
     }
+}
+
+/**
+ * Add Lab Record from Pharmacist Corner
+ * Auto-creates a lab tracker record for the appointment with:
+ * - Patient name / Doctor name from the appointment
+ * - Amount 0, Lab Name ".", Status "SENT TO LAB", Date = now
+ */
+function addLabRecordFromPharmacist(appointmentId) {
+    const appointment = appointments.find(appt => appt.id === appointmentId || appt.appointment_id === appointmentId);
+    if (!appointment) {
+        showNotification('Appointment not found', 'error');
+        return;
+    }
+
+    const patientName = appointment.patient_name || appointment.patientName || 'Unknown';
+    const doctorName = appointment.doctor_name || appointment.doctorName || 'Unknown';
+
+    // Use the appointment's date combined with the current time of day
+    const apptDateTime = appointment.appointment_time || appointment.appointmentTime;
+    const createDate = new Date(apptDateTime);
+    if (!isNaN(createDate.getTime())) {
+        const nowTime = new Date();
+        createDate.setHours(nowTime.getHours(), nowTime.getMinutes(), nowTime.getSeconds(), nowTime.getMilliseconds());
+    }
+    const now = createDate.toISOString();
+
+    // Resolve patientId/doctorId defensively to avoid FK violations
+    let resolvedPatientId = appointment.patient_id || appointment.patientId || null;
+    const existingPatient = patients.find(p => p.name === patientName || p.id === resolvedPatientId);
+    resolvedPatientId = existingPatient ? existingPatient.id : null;
+
+    let resolvedDoctorId = appointment.doctor_id || appointment.doctorId || null;
+    const existingDoctor = doctors.find(d => d.name === doctorName || d.id === resolvedDoctorId);
+    resolvedDoctorId = existingDoctor ? existingDoctor.id : null;
+
+    const labId = generateLabId();
+
+    const labData = {
+        id: labId, // Required for IndexedDB keyPath
+        labId: labId,
+        patientId: resolvedPatientId,
+        patientName: patientName,
+        doctorId: resolvedDoctorId,
+        doctorName: doctorName,
+        labName: '.',
+        amount: 0,
+        status: 'SENT TO LAB',
+        dateTime: now,
+        pendingTests: null,
+        timeline: {
+            sentToLab: now,
+            partialResult: null,
+            completeResult: null,
+            informDoctor: null,
+            informPatient: null,
+            patientReceived: null
+        }
+    };
+
+    // Add to in-memory array
+    labRecords.push(labData);
+
+    // Persist to IndexedDB (routes through DataLayer for cloud sync)
+    saveLabRecordsToStorage(labData.id)
+        .then(() => {
+            renderLabTracker();
+            updatePendingResultsAlert();
+
+            // Broadcast to calendar view via WebSocket
+            sendQueueEvent('lab_updated', labData);
+
+            // Dispatch custom event for calendar view (if open in same window)
+            window.dispatchEvent(new CustomEvent('lab-result-updated', {
+                detail: labData
+            }));
+
+            // Refresh calendar if visible
+            if (!elements.calendarSection.classList.contains('hidden')) {
+                refreshCalendar();
+            }
+
+            // Re-render pharmacist corner to update the card's lab status
+            renderPharmacistCorner();
+
+            // Force the queued lab record to flush to Supabase immediately
+            if (window.twokSyncManager && typeof window.twokSyncManager.flushQueue === 'function') {
+                window.twokSyncManager.flushQueue().catch(() => {});
+            }
+
+            showNotification(`Lab record created for ${patientName}`, 'success');
+        })
+        .catch(err => {
+            console.error('[Pharmacist] Failed to save lab record:', err);
+            showNotification('Failed to save lab record', 'error');
+        });
 }
 
 /**
