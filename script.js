@@ -4034,6 +4034,12 @@ function ensurePosReceiptModal() {
             .pos-charge-row .form-control { margin:0; }
             .pos-charge-row label { flex:1; font-size:0.85rem; color:var(--text-secondary); }
             .pos-charge-remove { flex-shrink:0; }
+            @media (max-width: 800px) {
+                .pos-charge-row { flex-direction:column; align-items:stretch; gap:6px; }
+                .pos-charge-row .pos-charge-label,
+                .pos-charge-row .pos-charge-amount { width:100%; font-size:16px; padding:10px 12px; }
+                .pos-charge-remove { width:100%; min-height:0; }
+            }
             .pos-total { border-top:1px solid #e5e7eb; margin-top:14px; padding-top:10px; font-size:0.95rem; }
             .pos-total > span { display:flex; justify-content:space-between; padding:4px 0; color:var(--text-primary); }
             .pos-total .pos-grand { font-weight:700; font-size:1.1rem; border-top:1px solid #e5e7eb; padding-top:8px; margin-top:4px; }
